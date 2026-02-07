@@ -12,6 +12,7 @@ uv run --project E:\VoiceInput python E:\VoiceInput\main.py
 
 - **包管理**: UV (`pyproject.toml` + `uv.lock`)，不使用 requirements.txt
 - **Python**: 3.12-3.13（3.14 无 PyTorch CUDA wheels）
+- **UI 框架**: PySide6 (Qt)，Windows 11 Fluent Design 暗色主题
 - **PyTorch CUDA**: `torch` 必须作为直接依赖才能让 `[tool.uv.sources]` 指向 cu128 索引
 - **GPU**: RTX 5090 (Blackwell/sm_120) 需要 cu128 索引；cu124 仅支持到 sm_90
 - **依赖覆盖**: `override-dependencies` 强制 `numba>=0.60`, `llvmlite>=0.43`, `librosa>=0.10`（qwen-asr 传递依赖版本过低）
@@ -19,7 +20,7 @@ uv run --project E:\VoiceInput python E:\VoiceInput\main.py
 ## 项目结构
 
 ```
-main.py                 入口：环境检查 → 模型加载 → 托盘应用
+main.py                 入口：环境检查 → 模型加载 → QApplication 事件循环
 config.py               默认配置常量（含 input_device）
 settings_manager.py     用户设置持久化 (~/.voiceinput/settings.json)
 pyproject.toml          UV 项目配置（依赖、CUDA 索引、构建）
@@ -30,9 +31,10 @@ core/
   text_injector.py      剪贴板写入 + ctypes SendInput 模拟 Ctrl+V
   hotkey_manager.py     全局快捷键，支持 push_to_talk / toggle 两种模式
 ui/
-  tray_app.py           系统托盘 + 组件协调器（核心调度）
-  overlay_window.py     悬浮状态窗口（录音中/识别中/结果），支持运行时开关
-  settings_window.py    ttkbootstrap 设置界面（快捷键、模式、麦克风、GPU 设备、输出选项）
+  app.py                QSystemTrayIcon + WorkerThread 组件协调器（核心调度）
+  overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果），click-through
+  settings_window.py    QDialog 设置界面（Fluent Design 暗色风格）
+  styles.py             Fluent Design QSS 样式表 + 颜色常量 + ToggleSwitch 控件
 utils/
   logger.py             日志配置
 ```
@@ -48,10 +50,9 @@ utils/
 
 ## 线程模型
 
-- **主线程**: `ttkbootstrap.Window` + `tk.mainloop()` 阻塞（Windows 要求 Tcl/Tk 在主线程创建）
-- **pystray 线程**: 系统托盘 `Icon.run()`（daemon 线程）
-- **keyboard 线程**: 快捷键 press/release 事件 → 写入 cmd_queue
-- **Worker 线程**: 从 cmd_queue 读命令，驱动录音→识别→粘贴流程
+- **主线程**: `QApplication.exec()` 事件循环，拥有所有 QWidget 和 QSystemTrayIcon
+- **keyboard 线程**: 快捷键 press/release 事件 → 写入 worker cmd_queue
+- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→识别→粘贴流程，通过 `state_changed` 信号更新 UI
 - **PortAudio 回调线程**: 音频帧写入 buffer
 
 ## 编码注意事项
@@ -62,11 +63,12 @@ utils/
 - 调用粘贴前必须 `_release_modifiers()` 用 `GetAsyncKeyState` 检测并释放残留修饰键
 - Cursor/VS Code 内嵌终端 (xterm.js) 对 SendInput Ctrl+V 不响应，属环境限制
 
-### ttkbootstrap / tkinter
-- **LabelFrame 不支持 `bootstyle=` 和 `padding=`**（Python 3.13，ttkbootstrap 猴子补丁映射到经典 tkinter.LabelFrame）。用子元素 `padx`/`pady` 替代
-- **设置窗口不要写死高度**，用 `winfo_reqwidth/reqheight` 让内容决定窗口大小，否则高 DPI 下按钮会被裁掉
-- `ttkbootstrap.Toplevel(master=parent)` 必须传 `master=`
-- `after_idle` 是 Tk 跨线程调度的安全方式
+### PySide6 / Qt
+- `QApplication.setQuitOnLastWindowClosed(False)` — 托盘应用必须设置，否则关闭设置窗口会退出程序
+- 跨线程 UI 更新用 Qt 信号/槽（自动 `QueuedConnection`）或 `QMetaObject.invokeMethod`
+- Overlay click-through 用 `winId()` 直接获取 HWND + Windows API `SetWindowLongW`
+- `Qt.WA_TranslucentBackground` + `paintEvent` 中 `QPainter.drawRoundedRect` 实现圆角透明窗口
+- QSS 样式表集中在 `ui/styles.py`，全局应用于 `QApplication`
 
 ### keyboard 库
 - hook 回调跑在 keyboard 自己的线程上，修改共享状态需加锁

@@ -78,15 +78,23 @@ def main():
     asr_engine = load_asr_engine(settings)
     atexit.register(asr_engine.unload_model)
 
-    from ui.tray_app import TrayApp
-    app = TrayApp(asr_engine=asr_engine, settings=settings)
+    from PySide6.QtWidgets import QApplication
+    from ui.styles import FLUENT_DARK_STYLESHEET
+    from ui.app import VoiceInputApp
+
+    qt_app = QApplication(sys.argv)
+    qt_app.setQuitOnLastWindowClosed(False)
+    qt_app.setStyleSheet(FLUENT_DARK_STYLESHEET)
+
+    app = VoiceInputApp(asr_engine=asr_engine, settings=settings)
+    app.start()
 
     hotkey_display = settings.get("hotkey", "display", default="Ctrl + Win")
     print(f"\nVoiceInput 已启动！按住 [{hotkey_display}] 开始录音，松开自动识别。")
     print("右键系统托盘图标可打开设置或退出。\n")
 
     try:
-        app.run()
+        sys.exit(qt_app.exec())
     except KeyboardInterrupt:
         logger.info("Interrupted by user")
     except Exception:

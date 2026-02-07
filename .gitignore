@@ -26,5 +26,8 @@ nul
 # User settings (runtime generated)
 # ~/.voiceinput/settings.json is outside the repo
 
+# Git worktrees
+.worktrees/
+
 # PyInstaller
 *.spec.bak

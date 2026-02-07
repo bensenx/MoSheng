@@ -1,0 +1,38 @@
+[project]
+name = "voiceinput"
+version = "1.0.0"
+description = "Local voice input tool powered by Qwen3-ASR"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+    "torch>=2.0",
+    "qwen-asr>=0.0.6",
+    "sounddevice>=0.4.6",
+    "numpy>=1.24",
+    "keyboard>=0.13.5",
+    "pywin32>=306",
+    "pystray>=0.19",
+    "Pillow>=10.0",
+    "ttkbootstrap>=1.10",
+]
+
+[tool.uv]
+override-dependencies = [
+    "numba>=0.60",
+    "llvmlite>=0.43",
+    "librosa>=0.10",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.uv.sources]
+torch = { index = "pytorch-cu128" }
+
+[tool.hatch.build.targets.wheel]
+packages = ["core", "ui", "utils"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

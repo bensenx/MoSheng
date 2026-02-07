@@ -7,9 +7,9 @@ import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QGroupBox, QHBoxLayout,
-    QInputDialog, QLabel, QLineEdit, QListWidget, QPushButton,
-    QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QComboBox, QDialog, QFileDialog, QGroupBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from settings_manager import SettingsManager
@@ -209,6 +209,9 @@ class SettingsWindow(QDialog):
         del_btn = QPushButton("删除")
         del_btn.clicked.connect(self._vocab_delete)
         btn_col.addWidget(del_btn)
+        import_btn = QPushButton("导入")
+        import_btn.clicked.connect(self._vocab_import)
+        btn_col.addWidget(import_btn)
         btn_col.addStretch()
         list_row.addLayout(btn_col)
 
@@ -324,6 +327,31 @@ class SettingsWindow(QDialog):
         row = self._vocab_list.currentRow()
         if row >= 0:
             self._vocab_list.takeItem(row)
+
+    def _vocab_import(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入词汇表", "",
+            "CSV / 文本文件 (*.csv *.txt);;所有文件 (*)",
+        )
+        if not path:
+            return
+        existing = {self._vocab_list.item(i).text()
+                    for i in range(self._vocab_list.count())}
+        added = 0
+        try:
+            import csv
+            with open(path, encoding="utf-8-sig") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    for cell in row:
+                        word = cell.strip()
+                        if word and word not in existing:
+                            self._vocab_list.addItem(word)
+                            existing.add(word)
+                            added += 1
+            logger.info("Imported %d words from %s", added, path)
+        except Exception:
+            logger.exception("Failed to import vocabulary from %s", path)
 
     # --- Save / Cancel ---
 

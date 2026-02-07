@@ -3,16 +3,23 @@
 import logging
 from typing import Callable
 
+import os
+
 import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
+from PySide6.QtGui import QIcon, QPixmap
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QFileDialog, QGroupBox,
-    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
-    QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QComboBox, QDialog, QGroupBox,
+    QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QRadioButton, QVBoxLayout, QWidget,
 )
 
+from config import ASSETS_DIR, VOCABULARY_FILE
 from settings_manager import SettingsManager
-from ui.styles import ToggleSwitch, apply_acrylic_effect
+from ui.styles import (
+    COLOR_ACCENT, COLOR_TEXT_SECONDARY, IconGroupBox, ToggleSwitch,
+    apply_acrylic_effect,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,12 +37,20 @@ class SettingsWindow(QDialog):
         self._hotkey_keys: list[str] = []
         self._input_devices: list[tuple[int | None, str]] = []
 
-        self.setWindowTitle("VoiceInput 设置")
+        self.setWindowTitle("MoSheng 设置")
         self.setMinimumWidth(460)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setObjectName("settingsRoot")
+
+        # Set window title bar icon
+        for ext in ("ico", "png"):
+            icon_path = os.path.join(ASSETS_DIR, f"icon.{ext}")
+            if os.path.isfile(icon_path):
+                self.setWindowIcon(QIcon(icon_path))
+                break
 
         self._build_ui()
         self.adjustSize()
@@ -66,8 +81,52 @@ class SettingsWindow(QDialog):
         main_layout.setSpacing(8)
         main_layout.setContentsMargins(24, 24, 24, 24)
 
+        # --- Logo + Title Header ---
+        header = QHBoxLayout()
+        header.setSpacing(12)
+
+        icon_label = QLabel()
+        logo_size = 44
+        # Prefer PNG (high-res source) over ICO for crisp scaling
+        icon_path = None
+        for ext in ("png", "ico"):
+            p = os.path.join(ASSETS_DIR, f"icon.{ext}")
+            if os.path.isfile(p):
+                icon_path = p
+                break
+        if icon_path:
+            pm = QPixmap(icon_path).scaled(
+                logo_size * 2, logo_size * 2,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            pm.setDevicePixelRatio(2)
+            icon_label.setPixmap(pm)
+        icon_label.setFixedSize(logo_size, logo_size)
+        header.addWidget(icon_label)
+
+        title_col = QVBoxLayout()
+        title_col.setSpacing(0)
+        title_label = QLabel("墨声")
+        title_label.setStyleSheet(
+            f"font-size: 20px; font-weight: 700; color: {COLOR_ACCENT};"
+            " background: transparent;"
+        )
+        title_col.addWidget(title_label)
+        subtitle_label = QLabel("MoSheng \u00b7 本地智能语音输入")
+        subtitle_label.setStyleSheet(
+            f"font-size: 11px; color: {COLOR_TEXT_SECONDARY};"
+            " background: transparent;"
+        )
+        title_col.addWidget(subtitle_label)
+        header.addLayout(title_col)
+        header.addStretch()
+
+        main_layout.addLayout(header)
+        main_layout.addSpacing(8)
+
         # --- Hotkey Section ---
-        hk_group = QGroupBox("  \u2328  快捷键设置")
+        hk_group = IconGroupBox("快捷键设置", "keyboard")
         hk_layout = QVBoxLayout(hk_group)
         hk_layout.setSpacing(12)
 
@@ -113,7 +172,7 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(hk_group)
 
         # --- ASR Section ---
-        asr_group = QGroupBox("  \U0001f9e0  语音识别")
+        asr_group = IconGroupBox("语音识别", "waveform")
         asr_layout = QVBoxLayout(asr_group)
         asr_layout.setSpacing(12)
 
@@ -142,7 +201,7 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(asr_group)
 
         # --- Audio Input Section ---
-        mic_group = QGroupBox("  \U0001f3a4  音频输入")
+        mic_group = IconGroupBox("音频输入", "microphone")
         mic_layout = QVBoxLayout(mic_group)
 
         row_mic = QHBoxLayout()
@@ -164,7 +223,7 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(mic_group)
 
         # --- Output Section ---
-        out_group = QGroupBox("  \u2699  输出设置")
+        out_group = IconGroupBox("输出设置", "gear")
         out_layout = QVBoxLayout(out_group)
         out_layout.setSpacing(10)
 
@@ -189,7 +248,7 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(out_group)
 
         # --- Vocabulary Section ---
-        vocab_group = QGroupBox("自定义词汇")
+        vocab_group = IconGroupBox("自定义词汇", "book")
         vocab_layout = QVBoxLayout(vocab_group)
         vocab_layout.setSpacing(8)
 
@@ -199,32 +258,22 @@ class SettingsWindow(QDialog):
         )
         vocab_layout.addWidget(self._vocab_toggle)
 
-        hint = QLabel("添加专业术语、人名等，帮助模型更准确地识别这些词汇")
+        hint = QLabel("在 CSV 文件中添加专业术语、人名等，每行一个词汇")
         hint.setObjectName("secondaryLabel")
         hint.setWordWrap(True)
         vocab_layout.addWidget(hint)
 
-        list_row = QHBoxLayout()
-        self._vocab_list = QListWidget()
-        self._vocab_list.setMaximumHeight(120)
-        for word in s.get("vocabulary", "word_list", default=[]):
-            self._vocab_list.addItem(word)
-        list_row.addWidget(self._vocab_list)
+        vocab_row = QHBoxLayout()
+        word_count = self._count_vocab_words()
+        self._vocab_count_label = QLabel(f"已收录 {word_count} 个词汇")
+        self._vocab_count_label.setObjectName("secondaryLabel")
+        vocab_row.addWidget(self._vocab_count_label)
+        vocab_row.addStretch()
+        open_btn = QPushButton("打开词汇表")
+        open_btn.clicked.connect(self._open_vocab_file)
+        vocab_row.addWidget(open_btn)
+        vocab_layout.addLayout(vocab_row)
 
-        btn_col = QVBoxLayout()
-        add_btn = QPushButton("添加")
-        add_btn.clicked.connect(self._vocab_add)
-        btn_col.addWidget(add_btn)
-        del_btn = QPushButton("删除")
-        del_btn.clicked.connect(self._vocab_delete)
-        btn_col.addWidget(del_btn)
-        import_btn = QPushButton("导入")
-        import_btn.clicked.connect(self._vocab_import)
-        btn_col.addWidget(import_btn)
-        btn_col.addStretch()
-        list_row.addLayout(btn_col)
-
-        vocab_layout.addLayout(list_row)
         main_layout.addWidget(vocab_group)
 
         # --- Buttons ---
@@ -325,42 +374,25 @@ class SettingsWindow(QDialog):
         self._bind_btn.style().unpolish(self._bind_btn)
         self._bind_btn.style().polish(self._bind_btn)
 
-    # --- Vocabulary management ---
+    # --- Vocabulary ---
 
-    def _vocab_add(self) -> None:
-        text, ok = QInputDialog.getText(self, "添加词汇", "输入词汇或短语:")
-        if ok and text.strip():
-            self._vocab_list.addItem(text.strip())
-
-    def _vocab_delete(self) -> None:
-        row = self._vocab_list.currentRow()
-        if row >= 0:
-            self._vocab_list.takeItem(row)
-
-    def _vocab_import(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(
-            self, "导入词汇表", "",
-            "CSV / 文本文件 (*.csv *.txt);;所有文件 (*)",
-        )
-        if not path:
-            return
-        existing = {self._vocab_list.item(i).text()
-                    for i in range(self._vocab_list.count())}
-        added = 0
+    @staticmethod
+    def _count_vocab_words() -> int:
         try:
-            import csv
-            with open(path, encoding="utf-8-sig") as f:
-                reader = csv.reader(f)
-                for row in reader:
-                    for cell in row:
-                        word = cell.strip()
-                        if word and word not in existing:
-                            self._vocab_list.addItem(word)
-                            existing.add(word)
-                            added += 1
-            logger.info("Imported %d words from %s", added, path)
-        except Exception:
-            logger.exception("Failed to import vocabulary from %s", path)
+            with open(VOCABULARY_FILE, encoding="utf-8-sig") as f:
+                return sum(1 for line in f
+                           if line.strip() and not line.startswith("#"))
+        except FileNotFoundError:
+            return 0
+
+    def _open_vocab_file(self) -> None:
+        if not os.path.isfile(VOCABULARY_FILE):
+            os.makedirs(os.path.dirname(VOCABULARY_FILE), exist_ok=True)
+            with open(VOCABULARY_FILE, "w", encoding="utf-8") as f:
+                f.write("# 每行一个词汇（专业术语、人名等），帮助语音识别更准确\n")
+        # Open the folder and select the file in Explorer
+        import subprocess
+        subprocess.Popen(["explorer", "/select,", VOCABULARY_FILE])
 
     # --- Save / Cancel ---
 
@@ -384,9 +416,6 @@ class SettingsWindow(QDialog):
             self._settings.set("output", "restore_clipboard", self._restore_toggle.isChecked())
 
             self._settings.set("vocabulary", "enabled", self._vocab_toggle.isChecked())
-            words = [self._vocab_list.item(i).text()
-                     for i in range(self._vocab_list.count())]
-            self._settings.set("vocabulary", "word_list", words)
 
             self._settings.save()
             logger.info("Settings saved: mode=%s, hotkey=%s", mode, self._hotkey_keys)

@@ -1,4 +1,4 @@
-"""VoiceInput - Local voice input tool powered by Qwen3-ASR."""
+"""MoSheng (墨声) - Local voice input tool powered by Qwen3-ASR."""
 
 import atexit
 import sys
@@ -78,19 +78,29 @@ def main():
     asr_engine = load_asr_engine(settings)
     atexit.register(asr_engine.unload_model)
 
+    import os
+    from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
     from ui.styles import FLUENT_DARK_STYLESHEET
-    from ui.app import VoiceInputApp
+    from ui.app import MoShengApp
+    from config import ASSETS_DIR
 
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)
     qt_app.setStyleSheet(FLUENT_DARK_STYLESHEET)
 
-    app = VoiceInputApp(asr_engine=asr_engine, settings=settings)
+    # Set application icon (window title bars, taskbar)
+    for ext in ("ico", "png"):
+        icon_path = os.path.join(ASSETS_DIR, f"icon.{ext}")
+        if os.path.isfile(icon_path):
+            qt_app.setWindowIcon(QIcon(icon_path))
+            break
+
+    app = MoShengApp(asr_engine=asr_engine, settings=settings)
     app.start()
 
     hotkey_display = settings.get("hotkey", "display", default="Ctrl + Win")
-    print(f"\nVoiceInput 已启动！按住 [{hotkey_display}] 开始录音，松开自动识别。")
+    print(f"\nMoSheng 已启动！按住 [{hotkey_display}] 开始录音，松开自动识别。")
     print("右键系统托盘图标可打开设置或退出。\n")
 
     try:

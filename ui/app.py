@@ -4,9 +4,13 @@ import logging
 import queue
 import threading
 
+import os
+
 from PySide6.QtCore import QThread, Signal, Slot, Qt
-from PySide6.QtGui import QAction, QColor, QIcon, QPainter, QPixmap
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
+
+from config import ASSETS_DIR
 
 from settings_manager import SettingsManager
 from core.asr_base import ASRBase
@@ -16,9 +20,6 @@ from core.hotkey_manager import HotkeyManager
 from ui.overlay_window import (
     OverlayWindow, STATE_RECORDING, STATE_RECOGNIZING,
     STATE_RESULT, STATE_ERROR, STATE_IDLE,
-)
-from ui.styles import (
-    COLOR_IDLE_TRAY, COLOR_RECORDING, COLOR_RECOGNIZING,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,7 +102,7 @@ class WorkerThread(QThread):
             self.state_changed.emit(STATE_ERROR, "识别失败")
 
 
-class VoiceInputApp:
+class MoShengApp:
     """Main application: tray icon, overlay, worker thread, hotkey manager."""
 
     def __init__(self, asr_engine: ASRBase, settings: SettingsManager):
@@ -140,10 +141,14 @@ class VoiceInputApp:
             mode=hotkey_mode,
         )
 
-        # System tray
+        # Application icon (loaded from assets if available)
+        self._app_icon = self._load_app_icon()
+
+        # System tray — use the app icon
         self._tray = QSystemTrayIcon()
-        self._tray.setIcon(self._create_icon(COLOR_IDLE_TRAY))
-        self._tray.setToolTip("VoiceInput - 就绪")
+        if self._app_icon:
+            self._tray.setIcon(self._app_icon)
+        self._tray.setToolTip("MoSheng - 就绪")
 
         menu = QMenu()
         settings_action = QAction("设置", menu)
@@ -166,7 +171,7 @@ class VoiceInputApp:
         self._worker.start()
         self._tray.show()
 
-        logger.info("VoiceInput ready. Hotkey: %s",
+        logger.info("MoSheng ready. Hotkey: %s",
                      self._settings.get("hotkey", "display"))
 
     # ---- State handling (main thread, via signal) ----
@@ -176,47 +181,23 @@ class VoiceInputApp:
         self._overlay.set_state(state, text)
 
         if state == STATE_RECORDING:
-            self._tray.setIcon(self._create_icon(COLOR_RECORDING))
-            self._tray.setToolTip("VoiceInput - 录音中")
+            self._tray.setToolTip("MoSheng - 录音中")
         elif state == STATE_RECOGNIZING:
-            self._tray.setIcon(self._create_icon(COLOR_RECOGNIZING))
-            self._tray.setToolTip("VoiceInput - 识别中")
+            self._tray.setToolTip("MoSheng - 识别中")
         else:
-            self._tray.setIcon(self._create_icon(COLOR_IDLE_TRAY))
-            self._tray.setToolTip("VoiceInput - 就绪")
+            self._tray.setToolTip("MoSheng - 就绪")
 
-    # ---- Tray icon ----
+    # ---- Icons ----
 
-    def _create_icon(self, color: str) -> QIcon:
-        pixmap = QPixmap(64, 64)
-        pixmap.fill(QColor(0, 0, 0, 0))
-        p = QPainter(pixmap)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Circle background
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(color))
-        p.drawEllipse(8, 8, 48, 48)
-
-        # Microphone body
-        p.setBrush(QColor("white"))
-        p.drawRoundedRect(24, 16, 16, 22, 6, 6)
-
-        # Arc under mic
-        p.setPen(QColor("white"))
-        p.setPen(p.pen())  # ensure pen is set
-        from PySide6.QtGui import QPen
-        arc_pen = QPen(QColor("white"), 2)
-        p.setPen(arc_pen)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.drawArc(20, 28, 24, 20, 0, 180 * 16)
-
-        # Stand
-        p.drawLine(32, 48, 32, 54)
-        p.drawLine(26, 54, 38, 54)
-
-        p.end()
-        return QIcon(pixmap)
+    def _load_app_icon(self) -> QIcon | None:
+        """Load main app icon from assets/ (ico or png)."""
+        for ext in ("ico", "png"):
+            path = os.path.join(ASSETS_DIR, f"icon.{ext}")
+            if os.path.isfile(path):
+                icon = QIcon(path)
+                if not icon.isNull():
+                    return icon
+        return None
 
     # ---- Settings ----
 
@@ -257,10 +238,18 @@ class VoiceInputApp:
 
     def _build_hotword_context(self) -> str:
         enabled = self._settings.get("vocabulary", "enabled", default=True)
-        word_list = self._settings.get("vocabulary", "word_list", default=[])
-        if not enabled or not word_list:
+        if not enabled:
             return ""
-        return ", ".join(word_list)
+        from config import VOCABULARY_FILE
+        try:
+            with open(VOCABULARY_FILE, encoding="utf-8-sig") as f:
+                words = [line.strip() for line in f
+                         if line.strip() and not line.startswith("#")]
+        except FileNotFoundError:
+            return ""
+        if not words:
+            return ""
+        return ", ".join(words)
 
     # ---- Shutdown ----
 

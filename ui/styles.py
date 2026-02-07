@@ -2,12 +2,14 @@
 
 import ctypes
 import logging
+import math
 
 from PySide6.QtCore import (
-    Property, QEasingCurve, QPropertyAnimation, QRect, QSize, Qt, Signal,
+    Property, QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF,
+    QSize, Qt, Signal,
 )
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
-from PySide6.QtWidgets import QWidget
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QGroupBox, QWidget
 
 logger = logging.getLogger(__name__)
 
@@ -16,9 +18,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 COLOR_BASE = "rgba(20, 20, 24, 0.85)"
 COLOR_BASE_SOLID = "#141418"
-COLOR_SURFACE = "rgba(255, 255, 255, 0.06)"
-COLOR_SURFACE_HOVER = "rgba(255, 255, 255, 0.10)"
-COLOR_SURFACE_ACTIVE = "rgba(255, 255, 255, 0.04)"
+COLOR_SURFACE = "rgba(255, 255, 255, 0.12)"
+COLOR_SURFACE_HOVER = "rgba(255, 255, 255, 0.16)"
+COLOR_SURFACE_ACTIVE = "rgba(255, 255, 255, 0.08)"
 COLOR_ACCENT = "#5b7fff"
 COLOR_ACCENT_HOVER = "#7b9aff"
 COLOR_TEXT = "#f0f0f0"
@@ -49,19 +51,19 @@ FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif
 # ---------------------------------------------------------------------------
 
 def apply_acrylic_effect(hwnd: int) -> bool:
-    """Apply Windows 11 Mica Alt backdrop. Returns True on success."""
+    """Apply Windows 11 Acrylic (true frosted glass) backdrop. Returns True on success."""
     try:
         # DWMWA_SYSTEMBACKDROP_TYPE = 38  (Windows 11 22H2+)
-        # Value 3 = DWMSBT_TRANSIENTWINDOW (Acrylic)
-        # Value 4 = DWMSBT_TABBEDWINDOW (Mica Alt, darker)
+        # Value 3 = DWMSBT_TRANSIENTWINDOW (Acrylic — real frosted glass, shows blurred desktop)
+        # Value 4 = DWMSBT_TABBEDWINDOW (Mica Alt — wallpaper tinted, no real transparency)
         attr = 38
-        value = ctypes.c_int(4)
+        value = ctypes.c_int(3)  # Acrylic first for true transparency
         hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
         )
         if hr != 0:
-            # Fallback: try Acrylic (value 3)
-            value = ctypes.c_int(3)
+            # Fallback: try Mica Alt (value 4)
+            value = ctypes.c_int(4)
             hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
             )
@@ -126,7 +128,7 @@ QGroupBox {{
 QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 2px 10px;
+    padding: 2px 10px 2px 34px;
     color: {COLOR_TEXT_SECONDARY};
     font-size: 12px;
     font-weight: 500;
@@ -264,6 +266,27 @@ QRadioButton::indicator:hover {{
 QRadioButton::indicator:checked {{
     border: 2px solid {COLOR_ACCENT};
     background-color: {COLOR_ACCENT};
+}}
+
+/* ---- QListWidget ---- */
+QListWidget {{
+    background-color: rgba(255, 255, 255, 0.05);
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    padding: 4px;
+    color: {COLOR_TEXT};
+    outline: none;
+}}
+QListWidget::item {{
+    padding: 5px 8px;
+    border-radius: 6px;
+}}
+QListWidget::item:selected {{
+    background-color: rgba(91, 127, 255, 0.25);
+    color: {COLOR_TEXT};
+}}
+QListWidget::item:hover {{
+    background-color: {COLOR_SURFACE_HOVER};
 }}
 
 /* ---- QScrollBar (thin, subtle) ---- */
@@ -412,4 +435,120 @@ class ToggleSwitch(QWidget):
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                        self._label_text)
 
+        p.end()
+
+
+# ---------------------------------------------------------------------------
+# Section icons (QPainter line art)
+# ---------------------------------------------------------------------------
+
+def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> QPixmap:
+    """Draw a line-art icon at 2x resolution for crisp high-DPI display."""
+    scale = 2
+    ps = size * scale  # pixel size for rendering
+    pixmap = QPixmap(ps, ps)
+    pixmap.setDevicePixelRatio(scale)
+    pixmap.fill(QColor(0, 0, 0, 0))
+    p = QPainter(pixmap)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+    pen = QPen(QColor(color), 1.6)
+    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+    p.setPen(pen)
+    p.setBrush(Qt.BrushStyle.NoBrush)
+
+    s = float(size)  # logical size for drawing coordinates
+
+    if name == "keyboard":
+        p.drawRoundedRect(QRectF(1, 3, s - 2, s - 6), 2.5, 2.5)
+        ks = s * 0.16
+        for x in [s * 0.25, s * 0.5, s * 0.75]:
+            p.drawRoundedRect(QRectF(x - ks / 2, s * 0.38 - ks / 2, ks, ks), 0.8, 0.8)
+        p.drawLine(QPointF(s * 0.3, s * 0.68), QPointF(s * 0.7, s * 0.68))
+
+    elif name == "waveform":
+        heights = [0.3, 0.6, 1.0, 0.6, 0.3]
+        gap = s * 0.18
+        bar_w = s * 0.1
+        start_x = (s - (5 * bar_w + 4 * gap)) / 2
+        cy = s / 2
+        for i, h in enumerate(heights):
+            x = start_x + i * (bar_w + gap) + bar_w / 2
+            half_h = h * s * 0.38
+            p.drawLine(QPointF(x, cy - half_h), QPointF(x, cy + half_h))
+
+    elif name == "microphone":
+        cx = s / 2
+        cap_w = s * 0.35
+        cap_h = s * 0.45
+        p.drawRoundedRect(QRectF(cx - cap_w / 2, s * 0.05, cap_w, cap_h), cap_w / 2, cap_w / 2)
+        cradle_w = s * 0.55
+        cradle_h = s * 0.3
+        p.drawArc(QRectF(cx - cradle_w / 2, s * 0.28, cradle_w, cradle_h).toRect(), 0, -180 * 16)
+        p.drawLine(QPointF(cx, s * 0.73), QPointF(cx, s * 0.85))
+        p.drawLine(QPointF(cx - s * 0.18, s * 0.85), QPointF(cx + s * 0.18, s * 0.85))
+
+    elif name == "gear":
+        cx, cy = s / 2, s / 2
+        r_outer = s * 0.42
+        r_inner = s * 0.30
+        r_center = s * 0.15
+        teeth = 6
+        path = QPainterPath()
+        for i in range(teeth * 2):
+            angle = math.pi * i / teeth - math.pi / 2
+            r = r_outer if i % 2 == 0 else r_inner
+            x = cx + r * math.cos(angle)
+            y = cy + r * math.sin(angle)
+            if i == 0:
+                path.moveTo(x, y)
+            else:
+                path.lineTo(x, y)
+        path.closeSubpath()
+        p.drawPath(path)
+        p.drawEllipse(QPointF(cx, cy), r_center, r_center)
+
+    elif name == "book":
+        cx = s / 2
+        p.drawLine(QPointF(cx, s * 0.15), QPointF(cx, s * 0.85))
+        path_l = QPainterPath()
+        path_l.moveTo(cx, s * 0.15)
+        path_l.quadTo(s * 0.1, s * 0.15, s * 0.1, s * 0.25)
+        path_l.lineTo(s * 0.1, s * 0.75)
+        path_l.quadTo(s * 0.1, s * 0.85, cx, s * 0.85)
+        p.drawPath(path_l)
+        path_r = QPainterPath()
+        path_r.moveTo(cx, s * 0.15)
+        path_r.quadTo(s * 0.9, s * 0.15, s * 0.9, s * 0.25)
+        path_r.lineTo(s * 0.9, s * 0.75)
+        path_r.quadTo(s * 0.9, s * 0.85, cx, s * 0.85)
+        p.drawPath(path_r)
+
+    p.end()
+    return pixmap
+
+
+# ---------------------------------------------------------------------------
+# IconGroupBox: QGroupBox with a painted section icon
+# ---------------------------------------------------------------------------
+
+COLOR_ICON = "#8aa4ff"  # Brighter variant of accent for icons on dark backgrounds
+
+class IconGroupBox(QGroupBox):
+    """QGroupBox that draws a small icon to the left of its title text."""
+
+    def __init__(self, title: str, icon_name: str, parent: QWidget | None = None):
+        super().__init__(title, parent)
+        self._icon_pixmap = draw_section_icon(icon_name, COLOR_ICON, 18)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        # Draw icon in the title area
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        # Position: left-aligned in the title margin area
+        x = 12
+        y = -1  # align with title baseline
+        p.drawPixmap(x, y, self._icon_pixmap)
         p.end()

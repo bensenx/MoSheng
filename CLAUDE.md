@@ -1,6 +1,6 @@
-# VoiceInput
+# MoSheng (墨声)
 
-Windows 本地语音输入工具，基于 Qwen3-ASR-1.7B。支持**按住录音**和**按键切换**两种模式，松开/再按后自动识别并粘贴文本。可在设置中选择麦克风、快捷键、录音模式等。
+声音，化为笔墨。Windows 本地智能语音输入工具，基于 Qwen3-ASR-1.7B。支持**按住录音**和**按键切换**两种模式，松开/再按后自动识别并粘贴文本。暗色毛玻璃 Glassmorphism UI 风格。
 
 ## 运行
 
@@ -12,7 +12,7 @@ uv run --project E:\VoiceInput python E:\VoiceInput\main.py
 
 - **包管理**: UV (`pyproject.toml` + `uv.lock`)，不使用 requirements.txt
 - **Python**: 3.12-3.13（3.14 无 PyTorch CUDA wheels）
-- **UI 框架**: PySide6 (Qt)，Windows 11 Fluent Design 暗色主题
+- **UI 框架**: PySide6 (Qt)，暗色毛玻璃 Glassmorphism 主题 (DWM Acrylic backdrop)
 - **PyTorch CUDA**: `torch` 必须作为直接依赖才能让 `[tool.uv.sources]` 指向 cu128 索引
 - **GPU**: RTX 5090 (Blackwell/sm_120) 需要 cu128 索引；cu124 仅支持到 sm_90
 - **依赖覆盖**: `override-dependencies` 强制 `numba>=0.60`, `llvmlite>=0.43`, `librosa>=0.10`（qwen-asr 传递依赖版本过低）
@@ -22,7 +22,7 @@ uv run --project E:\VoiceInput python E:\VoiceInput\main.py
 ```
 main.py                 入口：环境检查 → 模型加载 → QApplication 事件循环
 config.py               默认配置常量（含 input_device）
-settings_manager.py     用户设置持久化 (~/.voiceinput/settings.json)
+settings_manager.py     用户设置持久化 (~/.mosheng/settings.json)
 pyproject.toml          UV 项目配置（依赖、CUDA 索引、构建）
 core/
   asr_base.py           ASR 抽象基类 (ABC)，可替换模型
@@ -32,9 +32,9 @@ core/
   hotkey_manager.py     全局快捷键，支持 push_to_talk / toggle 两种模式
 ui/
   app.py                QSystemTrayIcon + WorkerThread 组件协调器（核心调度）
-  overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果），click-through
-  settings_window.py    QDialog 设置界面（Fluent Design 暗色风格）
-  styles.py             Fluent Design QSS 样式表 + 颜色常量 + ToggleSwitch 控件
+  overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果），click-through + fade animation
+  settings_window.py    QDialog 设置界面（Glassmorphism + DWM Acrylic backdrop）
+  styles.py             Glassmorphism QSS + 颜色常量 + ToggleSwitch + IconGroupBox + draw_section_icon
 utils/
   logger.py             日志配置
 ```
@@ -47,6 +47,7 @@ utils/
 | 语音识别 | ASR 模型、GPU 设备 | ✗ 需重启 |
 | 音频输入 | 麦克风设备选择 | ✓ |
 | 输出 | 提示音、悬浮窗、剪贴板恢复 | ✓ |
+| 词汇 | 自定义词汇表、CSV/TXT 导入 | ✓ |
 
 ## 线程模型
 

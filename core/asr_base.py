@@ -13,8 +13,14 @@ class ASRBase(ABC):
         """Load model into memory/GPU."""
 
     @abstractmethod
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
-        """Transcribe audio numpy array to text."""
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000,
+                   context: str = "") -> str:
+        """Transcribe audio numpy array to text.
+
+        Args:
+            context: Optional vocabulary hint (e.g. comma-separated hotwords)
+                     to bias recognition toward expected terms.
+        """
 
     @abstractmethod
     def unload_model(self) -> None:

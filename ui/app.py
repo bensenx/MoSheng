@@ -41,6 +41,15 @@ class WorkerThread(QThread):
         self._injector = injector
         self._settings = settings
         self._cmd_queue: queue.Queue[str] = queue.Queue()
+        self._hotword_context: str = ""
+
+    @property
+    def hotword_context(self) -> str:
+        return self._hotword_context
+
+    @hotword_context.setter
+    def hotword_context(self, value: str) -> None:
+        self._hotword_context = value
 
     def enqueue(self, cmd: str) -> None:
         self._cmd_queue.put(cmd)
@@ -80,7 +89,8 @@ class WorkerThread(QThread):
         self.state_changed.emit(STATE_RECOGNIZING, "")
 
         try:
-            text = self._asr.transcribe(audio, self._recorder.sample_rate)
+            text = self._asr.transcribe(audio, self._recorder.sample_rate,
+                                          context=self._hotword_context)
             if text.strip():
                 self._injector.inject_text(text)
                 self.state_changed.emit(STATE_RESULT, text)
@@ -118,6 +128,7 @@ class VoiceInputApp:
         )
         self._worker.state_changed.connect(self._on_state_changed,
                                             Qt.ConnectionType.QueuedConnection)
+        self._worker.hotword_context = self._build_hotword_context()
 
         # Hotkey manager
         hotkey_keys = settings.get("hotkey", "keys", default=["ctrl", "left windows"])
@@ -241,7 +252,15 @@ class VoiceInputApp:
         self._recorder.device = self._settings.get(
             "audio", "input_device", default=None
         )
+        self._worker.hotword_context = self._build_hotword_context()
         logger.info("Settings applied")
+
+    def _build_hotword_context(self) -> str:
+        enabled = self._settings.get("vocabulary", "enabled", default=True)
+        word_list = self._settings.get("vocabulary", "word_list", default=[])
+        if not enabled or not word_list:
+            return ""
+        return ", ".join(word_list)
 
     # ---- Shutdown ----
 

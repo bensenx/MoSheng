@@ -1,18 +1,17 @@
-"""Settings window with PySide6 Fluent Design dark theme."""
+"""Settings window with glassmorphism dark theme and DWM Mica backdrop."""
 
 import logging
 from typing import Callable
 
 import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from settings_manager import SettingsManager
-from ui.styles import ToggleSwitch
+from ui.styles import ToggleSwitch, apply_acrylic_effect
 
 logger = logging.getLogger(__name__)
 
@@ -31,14 +30,25 @@ class SettingsWindow(QDialog):
         self._input_devices: list[tuple[int | None, str]] = []
 
         self.setWindowTitle("VoiceInput 设置")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(460)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
+        self.setObjectName("settingsRoot")
 
         self._build_ui()
         self.adjustSize()
         self._center_on_screen()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        # Apply DWM Mica backdrop after window has a valid HWND
+        hwnd = int(self.winId())
+        if not apply_acrylic_effect(hwnd):
+            # Fallback: solid dark background
+            self.setObjectName("settingsFallback")
+            self.style().unpolish(self)
+            self.style().polish(self)
 
     def _center_on_screen(self) -> None:
         from PySide6.QtWidgets import QApplication
@@ -52,18 +62,17 @@ class SettingsWindow(QDialog):
     def _build_ui(self) -> None:
         s = self._settings
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(12)
-        main_layout.setContentsMargins(20, 20, 20, 20)
-        self.setObjectName("settingsRoot")
+        main_layout.setSpacing(8)
+        main_layout.setContentsMargins(24, 24, 24, 24)
 
         # --- Hotkey Section ---
-        hk_group = QGroupBox("快捷键设置")
+        hk_group = QGroupBox("  \u2328  快捷键设置")
         hk_layout = QVBoxLayout(hk_group)
-        hk_layout.setSpacing(8)
+        hk_layout.setSpacing(12)
 
         # Row 1: hotkey display + bind button
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("录音快捷键:"))
+        row1.addWidget(QLabel("录音快捷键"))
 
         self._hotkey_keys = list(s.get("hotkey", "keys", default=["ctrl", "left windows"]))
         self._hotkey_edit = QLineEdit(
@@ -81,7 +90,7 @@ class SettingsWindow(QDialog):
 
         # Row 2: recording mode
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("模式:"))
+        row2.addWidget(QLabel("录音模式"))
 
         self._mode_group = QButtonGroup(self)
         self._push_radio = QRadioButton("按住录音")
@@ -103,12 +112,12 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(hk_group)
 
         # --- ASR Section ---
-        asr_group = QGroupBox("语音识别")
+        asr_group = QGroupBox("  \U0001f9e0  语音识别")
         asr_layout = QVBoxLayout(asr_group)
-        asr_layout.setSpacing(8)
+        asr_layout.setSpacing(12)
 
         row3 = QHBoxLayout()
-        row3.addWidget(QLabel("ASR 模型:"))
+        row3.addWidget(QLabel("ASR 模型"))
         model_combo = QComboBox()
         model_combo.addItem("Qwen3-ASR-1.7B")
         model_combo.setEnabled(False)
@@ -117,7 +126,7 @@ class SettingsWindow(QDialog):
         asr_layout.addLayout(row3)
 
         row4 = QHBoxLayout()
-        row4.addWidget(QLabel("设备:"))
+        row4.addWidget(QLabel("推理设备"))
         self._device_combo = QComboBox()
         devices = self._get_cuda_devices()
         self._device_combo.addItems(devices)
@@ -132,11 +141,11 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(asr_group)
 
         # --- Audio Input Section ---
-        mic_group = QGroupBox("音频输入")
+        mic_group = QGroupBox("  \U0001f3a4  音频输入")
         mic_layout = QVBoxLayout(mic_group)
 
         row_mic = QHBoxLayout()
-        row_mic.addWidget(QLabel("麦克风:"))
+        row_mic.addWidget(QLabel("麦克风"))
         self._mic_combo = QComboBox()
         self._input_devices = self._get_input_devices()
         for _, name in self._input_devices:
@@ -146,7 +155,7 @@ class SettingsWindow(QDialog):
             if dev_id == saved_dev:
                 self._mic_combo.setCurrentIndex(i)
                 break
-        self._mic_combo.setMinimumWidth(220)
+        self._mic_combo.setMinimumWidth(240)
         row_mic.addWidget(self._mic_combo)
         row_mic.addStretch()
         mic_layout.addLayout(row_mic)
@@ -154,9 +163,9 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(mic_group)
 
         # --- Output Section ---
-        out_group = QGroupBox("输出设置")
+        out_group = QGroupBox("  \u2699  输出设置")
         out_layout = QVBoxLayout(out_group)
-        out_layout.setSpacing(8)
+        out_layout.setSpacing(10)
 
         self._sound_toggle = ToggleSwitch(
             "录音开始/结束提示音",
@@ -179,6 +188,7 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(out_group)
 
         # --- Buttons ---
+        main_layout.addSpacing(8)
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -244,7 +254,6 @@ class SettingsWindow(QDialog):
                 k.capitalize() if len(k) > 1 else k.upper()
                 for k in sorted(self._captured_keys)
             )
-            # Thread-safe UI update via invokeMethod
             QMetaObject.invokeMethod(
                 self._hotkey_edit, "setText",
                 Qt.ConnectionType.QueuedConnection,
@@ -289,7 +298,6 @@ class SettingsWindow(QDialog):
 
             self._settings.set("asr", "device", self._device_combo.currentText())
 
-            # Resolve mic display name to device id
             mic_idx = self._mic_combo.currentIndex()
             input_dev_id = self._input_devices[mic_idx][0] if mic_idx < len(self._input_devices) else None
             self._settings.set("audio", "input_device", input_dev_id)

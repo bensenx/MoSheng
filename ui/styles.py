@@ -1,26 +1,34 @@
-"""Fluent Design dark theme: QSS stylesheet, color constants, and ToggleSwitch widget."""
+"""Glassmorphism dark theme: QSS stylesheet, DWM backdrop, color constants, ToggleSwitch."""
+
+import ctypes
+import logging
 
 from PySide6.QtCore import (
     Property, QEasingCurve, QPropertyAnimation, QRect, QSize, Qt, Signal,
 )
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QWidget
 
-# ---------------------------------------------------------------------------
-# Color palette  (Windows 11 Fluent Design dark)
-# ---------------------------------------------------------------------------
-COLOR_BASE = "#202020"
-COLOR_SURFACE = "#2d2d2d"
-COLOR_SURFACE_HOVER = "#383838"
-COLOR_ACCENT = "#60cdff"
-COLOR_ACCENT_HOVER = "#78d6ff"
-COLOR_TEXT = "#ffffff"
-COLOR_TEXT_SECONDARY = "#c5c5c5"
-COLOR_TEXT_DISABLED = "#9d9d9d"
-COLOR_BORDER = "#3d3d3d"
-COLOR_BORDER_FOCUS = "#60cdff"
+logger = logging.getLogger(__name__)
 
-# Overlay / tray state colors  (Catppuccin-inspired)
+# ---------------------------------------------------------------------------
+# Color palette  (Glassmorphism dark)
+# ---------------------------------------------------------------------------
+COLOR_BASE = "rgba(20, 20, 24, 0.85)"
+COLOR_BASE_SOLID = "#141418"
+COLOR_SURFACE = "rgba(255, 255, 255, 0.06)"
+COLOR_SURFACE_HOVER = "rgba(255, 255, 255, 0.10)"
+COLOR_SURFACE_ACTIVE = "rgba(255, 255, 255, 0.04)"
+COLOR_ACCENT = "#5b7fff"
+COLOR_ACCENT_HOVER = "#7b9aff"
+COLOR_TEXT = "#f0f0f0"
+COLOR_TEXT_SECONDARY = "rgba(255, 255, 255, 0.55)"
+COLOR_TEXT_DISABLED = "rgba(255, 255, 255, 0.28)"
+COLOR_BORDER = "rgba(255, 255, 255, 0.08)"
+COLOR_BORDER_HOVER = "rgba(255, 255, 255, 0.14)"
+COLOR_BORDER_FOCUS = "#5b7fff"
+
+# Overlay / tray state colors
 COLOR_RECORDING = "#f38ba8"
 COLOR_RECOGNIZING = "#f9e2af"
 COLOR_RESULT = "#a6e3a1"
@@ -28,194 +36,271 @@ COLOR_ERROR = "#f38ba8"
 COLOR_IDLE_TRAY = "#6c7086"
 
 # Overlay background
-COLOR_OVERLAY_BG = "#1e1e2e"
-COLOR_OVERLAY_TEXT = "#cdd6f4"
+COLOR_OVERLAY_BG = "#1a1a24"
+COLOR_OVERLAY_TEXT = "#e0e0e8"
 
 # ---------------------------------------------------------------------------
-# Global QSS stylesheet
+# Font
 # ---------------------------------------------------------------------------
-FLUENT_DARK_STYLESHEET = """
+FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif'
+
+# ---------------------------------------------------------------------------
+# Windows DWM Acrylic / Mica backdrop
+# ---------------------------------------------------------------------------
+
+def apply_acrylic_effect(hwnd: int) -> bool:
+    """Apply Windows 11 Mica Alt backdrop. Returns True on success."""
+    try:
+        # DWMWA_SYSTEMBACKDROP_TYPE = 38  (Windows 11 22H2+)
+        # Value 3 = DWMSBT_TRANSIENTWINDOW (Acrylic)
+        # Value 4 = DWMSBT_TABBEDWINDOW (Mica Alt, darker)
+        attr = 38
+        value = ctypes.c_int(4)
+        hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
+        )
+        if hr != 0:
+            # Fallback: try Acrylic (value 3)
+            value = ctypes.c_int(3)
+            hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
+            )
+
+        # Also enable dark mode title bar
+        # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
+        dark = ctypes.c_int(1)
+        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+            hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark)
+        )
+
+        # Extend frame into client area for blur to work
+        class MARGINS(ctypes.Structure):
+            _fields_ = [
+                ("cxLeftWidth", ctypes.c_int),
+                ("cxRightWidth", ctypes.c_int),
+                ("cyTopHeight", ctypes.c_int),
+                ("cyBottomHeight", ctypes.c_int),
+            ]
+        margins = MARGINS(-1, -1, -1, -1)
+        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(
+            hwnd, ctypes.byref(margins)
+        )
+
+        return hr == 0
+    except Exception:
+        logger.debug("DWM acrylic effect not available")
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Global QSS stylesheet (Glassmorphism)
+# ---------------------------------------------------------------------------
+FLUENT_DARK_STYLESHEET = f"""
 /* ---- Global ---- */
-* {
-    font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+* {{
+    font-family: {FONT_FAMILY};
     font-size: 14px;
-    color: #ffffff;
-}
+    color: {COLOR_TEXT};
+}}
 
 /* ---- QDialog / QWidget backgrounds ---- */
-QDialog, QWidget#settingsRoot {
-    background-color: #202020;
-}
+QDialog, QWidget#settingsRoot {{
+    background-color: transparent;
+}}
 
-/* ---- QGroupBox (card-like section) ---- */
-QGroupBox {
-    background-color: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    border-radius: 8px;
-    margin-top: 12px;
-    padding: 16px 12px 12px 12px;
+/* Fallback solid bg when acrylic not available */
+QDialog#settingsFallback {{
+    background-color: {COLOR_BASE_SOLID};
+}}
+
+/* ---- QGroupBox (glass card) ---- */
+QGroupBox {{
+    background-color: {COLOR_SURFACE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 12px;
+    margin-top: 14px;
+    padding: 20px 16px 16px 16px;
     font-weight: 600;
-}
-QGroupBox::title {
+    font-size: 13px;
+}}
+QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
-    padding: 0 8px;
-    color: #c5c5c5;
-    font-size: 13px;
-}
+    padding: 2px 10px;
+    color: {COLOR_TEXT_SECONDARY};
+    font-size: 12px;
+    font-weight: 500;
+}}
 
 /* ---- QLabel ---- */
-QLabel {
+QLabel {{
     background: transparent;
-    color: #ffffff;
-}
-QLabel#secondaryLabel {
-    color: #c5c5c5;
-}
+    color: {COLOR_TEXT};
+}}
+QLabel#secondaryLabel {{
+    color: {COLOR_TEXT_SECONDARY};
+}}
+QLabel#sectionIcon {{
+    font-size: 16px;
+    padding-right: 6px;
+}}
 
 /* ---- QLineEdit ---- */
-QLineEdit {
-    background-color: #383838;
-    border: 1px solid #3d3d3d;
-    border-radius: 4px;
-    padding: 5px 8px;
-    color: #ffffff;
-    selection-background-color: #60cdff;
-}
-QLineEdit:focus {
-    border: 1px solid #60cdff;
-}
-QLineEdit:read-only {
-    background-color: #2d2d2d;
-    color: #c5c5c5;
-}
+QLineEdit {{
+    background-color: {COLOR_SURFACE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: {COLOR_TEXT};
+    selection-background-color: {COLOR_ACCENT};
+}}
+QLineEdit:focus {{
+    border: 1px solid {COLOR_BORDER_FOCUS};
+}}
+QLineEdit:read-only {{
+    background-color: rgba(255, 255, 255, 0.03);
+    color: {COLOR_TEXT_SECONDARY};
+}}
 
 /* ---- QPushButton ---- */
-QPushButton {
-    background-color: #383838;
-    border: 1px solid #3d3d3d;
-    border-radius: 4px;
-    padding: 6px 16px;
-    color: #ffffff;
-    min-width: 72px;
-}
-QPushButton:hover {
-    background-color: #434343;
-    border: 1px solid #4d4d4d;
-}
-QPushButton:pressed {
-    background-color: #2d2d2d;
-}
+QPushButton {{
+    background-color: {COLOR_SURFACE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    padding: 8px 20px;
+    color: {COLOR_TEXT};
+    min-width: 80px;
+    font-weight: 500;
+}}
+QPushButton:hover {{
+    background-color: {COLOR_SURFACE_HOVER};
+    border: 1px solid {COLOR_BORDER_HOVER};
+}}
+QPushButton:pressed {{
+    background-color: {COLOR_SURFACE_ACTIVE};
+}}
 
 /* Primary / accent button */
-QPushButton#primaryButton {
-    background-color: #60cdff;
-    border: 1px solid #60cdff;
-    color: #000000;
-    font-weight: 600;
-}
-QPushButton#primaryButton:hover {
-    background-color: #78d6ff;
-    border: 1px solid #78d6ff;
-}
-QPushButton#primaryButton:pressed {
-    background-color: #4db8e8;
-}
-
-/* Danger button (used during hotkey capture) */
-QPushButton#dangerButton {
-    background-color: #c42b1c;
-    border: 1px solid #c42b1c;
+QPushButton#primaryButton {{
+    background-color: {COLOR_ACCENT};
+    border: 1px solid {COLOR_ACCENT};
     color: #ffffff;
-}
+    font-weight: 600;
+}}
+QPushButton#primaryButton:hover {{
+    background-color: {COLOR_ACCENT_HOVER};
+    border: 1px solid {COLOR_ACCENT_HOVER};
+}}
+QPushButton#primaryButton:pressed {{
+    background-color: #4a6be0;
+}}
+
+/* Danger button (hotkey capture) */
+QPushButton#dangerButton {{
+    background-color: rgba(244, 67, 54, 0.25);
+    border: 1px solid rgba(244, 67, 54, 0.4);
+    color: #ff6b6b;
+}}
 
 /* ---- QComboBox ---- */
-QComboBox {
-    background-color: #383838;
-    border: 1px solid #3d3d3d;
-    border-radius: 4px;
-    padding: 5px 8px;
-    color: #ffffff;
+QComboBox {{
+    background-color: {COLOR_SURFACE};
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    padding: 7px 12px;
+    color: {COLOR_TEXT};
     min-width: 120px;
-}
-QComboBox:hover {
-    border: 1px solid #4d4d4d;
-}
-QComboBox:focus {
-    border: 1px solid #60cdff;
-}
-QComboBox::drop-down {
+}}
+QComboBox:hover {{
+    border: 1px solid {COLOR_BORDER_HOVER};
+    background-color: {COLOR_SURFACE_HOVER};
+}}
+QComboBox:focus {{
+    border: 1px solid {COLOR_BORDER_FOCUS};
+}}
+QComboBox::drop-down {{
     border: none;
-    width: 24px;
-}
-QComboBox::down-arrow {
+    width: 28px;
+}}
+QComboBox::down-arrow {{
     image: none;
     border-left: 5px solid transparent;
     border-right: 5px solid transparent;
-    border-top: 6px solid #c5c5c5;
-    margin-right: 8px;
-}
-QComboBox QAbstractItemView {
-    background-color: #2d2d2d;
-    border: 1px solid #3d3d3d;
-    selection-background-color: #383838;
-    color: #ffffff;
+    border-top: 5px solid rgba(255, 255, 255, 0.45);
+    margin-right: 10px;
+}}
+QComboBox QAbstractItemView {{
+    background-color: rgba(30, 30, 36, 0.95);
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 8px;
+    selection-background-color: {COLOR_SURFACE_HOVER};
+    color: {COLOR_TEXT};
     outline: none;
-}
+    padding: 4px;
+}}
+QComboBox QAbstractItemView::item {{
+    padding: 6px 12px;
+    border-radius: 6px;
+}}
+QComboBox QAbstractItemView::item:selected {{
+    background-color: {COLOR_SURFACE_HOVER};
+}}
 
 /* ---- QRadioButton ---- */
-QRadioButton {
+QRadioButton {{
     spacing: 8px;
     background: transparent;
-}
-QRadioButton::indicator {
+}}
+QRadioButton::indicator {{
     width: 18px;
     height: 18px;
     border-radius: 9px;
-    border: 2px solid #9d9d9d;
+    border: 2px solid rgba(255, 255, 255, 0.3);
     background-color: transparent;
-}
-QRadioButton::indicator:hover {
-    border: 2px solid #c5c5c5;
-}
-QRadioButton::indicator:checked {
-    border: 2px solid #60cdff;
-    background-color: #60cdff;
-}
+}}
+QRadioButton::indicator:hover {{
+    border: 2px solid rgba(255, 255, 255, 0.45);
+}}
+QRadioButton::indicator:checked {{
+    border: 2px solid {COLOR_ACCENT};
+    background-color: {COLOR_ACCENT};
+}}
 
 /* ---- QScrollBar (thin, subtle) ---- */
-QScrollBar:vertical {
+QScrollBar:vertical {{
     background: transparent;
     width: 6px;
-}
-QScrollBar::handle:vertical {
-    background: #4d4d4d;
+}}
+QScrollBar::handle:vertical {{
+    background: rgba(255, 255, 255, 0.15);
     border-radius: 3px;
     min-height: 20px;
-}
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
     height: 0;
-}
+}}
 
 /* ---- QMenu (tray context menu) ---- */
-QMenu {
-    background-color: #2d2d2d;
-    border: 1px solid #3d3d3d;
+QMenu {{
+    background-color: rgba(30, 30, 36, 0.92);
+    border: 1px solid {COLOR_BORDER};
+    border-radius: 12px;
+    padding: 6px 4px;
+}}
+QMenu::item {{
+    padding: 8px 28px 8px 16px;
     border-radius: 8px;
-    padding: 4px 0;
-}
-QMenu::item {
-    padding: 6px 24px;
-    color: #ffffff;
-}
-QMenu::item:selected {
-    background-color: #383838;
-}
-QMenu::separator {
+    margin: 2px 4px;
+    color: {COLOR_TEXT};
+}}
+QMenu::item:selected {{
+    background-color: {COLOR_SURFACE_HOVER};
+}}
+QMenu::separator {{
     height: 1px;
-    background: #3d3d3d;
-    margin: 4px 8px;
-}
+    background: {COLOR_BORDER};
+    margin: 4px 12px;
+}}
 """
 
 # ---------------------------------------------------------------------------
@@ -223,13 +308,13 @@ QMenu::separator {
 # ---------------------------------------------------------------------------
 
 class ToggleSwitch(QWidget):
-    """A Windows 11-style toggle switch with smooth animation."""
+    """A glassmorphism-style toggle switch with smooth animation."""
 
     toggled = Signal(bool)
 
     TRACK_WIDTH = 44
-    TRACK_HEIGHT = 22
-    KNOB_RADIUS = 7
+    TRACK_HEIGHT = 24
+    KNOB_RADIUS = 8
     KNOB_MARGIN = 4
 
     def __init__(self, text: str = "", checked: bool = False, parent: QWidget | None = None):
@@ -239,10 +324,10 @@ class ToggleSwitch(QWidget):
         self._knob_pos = 1.0 if checked else 0.0
 
         self._animation = QPropertyAnimation(self, b"knobPos", self)
-        self._animation.setDuration(150)
-        self._animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        self._animation.setDuration(200)
+        self._animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
 
-        self.setFixedHeight(28)
+        self.setFixedHeight(32)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
     # --- Qt property for animation ---
@@ -279,7 +364,7 @@ class ToggleSwitch(QWidget):
         fm = self.fontMetrics()
         text_w = fm.horizontalAdvance(self._label_text) if self._label_text else 0
         total_w = self.TRACK_WIDTH + (12 + text_w if text_w else 0)
-        return QSize(total_w, 28)
+        return QSize(total_w, 32)
 
     def paintEvent(self, event) -> None:
         p = QPainter(self)
@@ -290,21 +375,31 @@ class ToggleSwitch(QWidget):
                            self.TRACK_WIDTH, self.TRACK_HEIGHT)
         track_radius = self.TRACK_HEIGHT / 2
 
+        # Smooth color transition via knob_pos
         if self._knob_pos > 0.5:
-            p.setBrush(QColor(COLOR_ACCENT))
-            p.setPen(QColor(COLOR_ACCENT))
+            track_color = QColor(COLOR_ACCENT)
+            track_border = QColor(COLOR_ACCENT)
+            track_border.setAlphaF(0.6)
         else:
-            p.setBrush(QColor("#4d4d4d"))
-            p.setPen(QColor("#6d6d6d"))
+            track_color = QColor(255, 255, 255, 20)
+            track_border = QColor(255, 255, 255, 40)
+
+        p.setBrush(track_color)
+        p.setPen(QPen(track_border, 1))
         p.drawRoundedRect(track_rect, track_radius, track_radius)
 
-        # Knob
+        # Knob with subtle shadow
         knob_y = self.height() // 2
         x_off = self.KNOB_MARGIN + self.KNOB_RADIUS
         x_on = self.TRACK_WIDTH - self.KNOB_MARGIN - self.KNOB_RADIUS
         knob_x = x_off + (x_on - x_off) * self._knob_pos
 
+        # Shadow
         p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 40))
+        p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS + 1),
+                       self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)
+        # Knob
         p.setBrush(QColor("#ffffff"))
         p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS),
                        self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)

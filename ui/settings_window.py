@@ -6,8 +6,9 @@ from typing import Callable
 import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QGroupBox, QHBoxLayout, QLabel,
-    QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QComboBox, QDialog, QFileDialog, QGroupBox,
+    QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from settings_manager import SettingsManager
@@ -187,6 +188,45 @@ class SettingsWindow(QDialog):
 
         main_layout.addWidget(out_group)
 
+        # --- Vocabulary Section ---
+        vocab_group = QGroupBox("自定义词汇")
+        vocab_layout = QVBoxLayout(vocab_group)
+        vocab_layout.setSpacing(8)
+
+        self._vocab_toggle = ToggleSwitch(
+            "启用生词辅助识别",
+            checked=s.get("vocabulary", "enabled", default=True),
+        )
+        vocab_layout.addWidget(self._vocab_toggle)
+
+        hint = QLabel("添加专业术语、人名等，帮助模型更准确地识别这些词汇")
+        hint.setObjectName("secondaryLabel")
+        hint.setWordWrap(True)
+        vocab_layout.addWidget(hint)
+
+        list_row = QHBoxLayout()
+        self._vocab_list = QListWidget()
+        self._vocab_list.setMaximumHeight(120)
+        for word in s.get("vocabulary", "word_list", default=[]):
+            self._vocab_list.addItem(word)
+        list_row.addWidget(self._vocab_list)
+
+        btn_col = QVBoxLayout()
+        add_btn = QPushButton("添加")
+        add_btn.clicked.connect(self._vocab_add)
+        btn_col.addWidget(add_btn)
+        del_btn = QPushButton("删除")
+        del_btn.clicked.connect(self._vocab_delete)
+        btn_col.addWidget(del_btn)
+        import_btn = QPushButton("导入")
+        import_btn.clicked.connect(self._vocab_import)
+        btn_col.addWidget(import_btn)
+        btn_col.addStretch()
+        list_row.addLayout(btn_col)
+
+        vocab_layout.addLayout(list_row)
+        main_layout.addWidget(vocab_group)
+
         # --- Buttons ---
         main_layout.addSpacing(8)
         btn_layout = QHBoxLayout()
@@ -285,6 +325,43 @@ class SettingsWindow(QDialog):
         self._bind_btn.style().unpolish(self._bind_btn)
         self._bind_btn.style().polish(self._bind_btn)
 
+    # --- Vocabulary management ---
+
+    def _vocab_add(self) -> None:
+        text, ok = QInputDialog.getText(self, "添加词汇", "输入词汇或短语:")
+        if ok and text.strip():
+            self._vocab_list.addItem(text.strip())
+
+    def _vocab_delete(self) -> None:
+        row = self._vocab_list.currentRow()
+        if row >= 0:
+            self._vocab_list.takeItem(row)
+
+    def _vocab_import(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "导入词汇表", "",
+            "CSV / 文本文件 (*.csv *.txt);;所有文件 (*)",
+        )
+        if not path:
+            return
+        existing = {self._vocab_list.item(i).text()
+                    for i in range(self._vocab_list.count())}
+        added = 0
+        try:
+            import csv
+            with open(path, encoding="utf-8-sig") as f:
+                reader = csv.reader(f)
+                for row in reader:
+                    for cell in row:
+                        word = cell.strip()
+                        if word and word not in existing:
+                            self._vocab_list.addItem(word)
+                            existing.add(word)
+                            added += 1
+            logger.info("Imported %d words from %s", added, path)
+        except Exception:
+            logger.exception("Failed to import vocabulary from %s", path)
+
     # --- Save / Cancel ---
 
     def _on_save_click(self) -> None:
@@ -305,6 +382,11 @@ class SettingsWindow(QDialog):
             self._settings.set("output", "sound_enabled", self._sound_toggle.isChecked())
             self._settings.set("output", "overlay_enabled", self._overlay_toggle.isChecked())
             self._settings.set("output", "restore_clipboard", self._restore_toggle.isChecked())
+
+            self._settings.set("vocabulary", "enabled", self._vocab_toggle.isChecked())
+            words = [self._vocab_list.item(i).text()
+                     for i in range(self._vocab_list.count())]
+            self._settings.set("vocabulary", "word_list", words)
 
             self._settings.save()
             logger.info("Settings saved: mode=%s, hotkey=%s", mode, self._hotkey_keys)

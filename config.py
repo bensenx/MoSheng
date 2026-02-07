@@ -35,4 +35,8 @@ DEFAULT_SETTINGS = {
         "overlay_enabled": True,
         "restore_clipboard": True,
     },
+    "vocabulary": {
+        "enabled": True,
+        "word_list": [],
+    },
 }

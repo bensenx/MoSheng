@@ -50,18 +50,22 @@ class QwenASREngine(ASRBase):
         self._model.transcribe(audio=(dummy, 16000), language=None)
         logger.info("Warmup complete")
 
-    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000) -> str:
+    def transcribe(self, audio: np.ndarray, sample_rate: int = 16000,
+                   context: str = "") -> str:
         if not self.is_ready:
             raise RuntimeError("Model not loaded. Call load_model() first.")
 
         rms = float(np.sqrt(np.mean(audio ** 2)))
         peak = float(np.max(np.abs(audio)))
         logger.info("Audio stats: samples=%d, rms=%.6f, peak=%.6f", len(audio), rms, peak)
+        if context:
+            logger.info("Using hotword context: %s", context[:80])
 
         t0 = time.time()
         results = self._model.transcribe(
             audio=(audio, sample_rate),
             language=None,
+            context=context,
         )
         elapsed = time.time() - t0
 

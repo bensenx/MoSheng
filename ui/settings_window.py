@@ -43,6 +43,7 @@ class SettingsWindow(QDialog):
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setObjectName("settingsRoot")
 
         # Set window title bar icon

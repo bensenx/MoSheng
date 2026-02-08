@@ -344,6 +344,9 @@ class SettingsWindow(QDialog):
         dialog = EnrollmentDialog(self._settings, parent=self)
         if dialog.exec():
             self._sv_status_label.setText(self._get_enrollment_status())
+            # Auto-enable and save so verifier loads immediately
+            self._sv_toggle.setChecked(True)
+            self._on_save_click()
 
     # --- Device discovery ---
 

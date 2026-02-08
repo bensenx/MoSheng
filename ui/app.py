@@ -48,7 +48,7 @@ class WorkerThread(QThread):
         self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._hotword_context: str = ""
         self._progressive: bool = False
-        self._silence_threshold: float = 0.05
+        self._silence_threshold: float = 0.01
         self._silence_duration: float = 0.8
 
     @property
@@ -260,7 +260,7 @@ class MoShengApp:
                                             Qt.ConnectionType.QueuedConnection)
         self._worker.hotword_context = self._build_hotword_context()
         self._worker.progressive = settings.get("hotkey", "progressive", default=False)
-        self._worker.silence_threshold = settings.get("hotkey", "silence_threshold", default=0.05)
+        self._worker.silence_threshold = settings.get("hotkey", "silence_threshold", default=0.01)
         self._worker.silence_duration = settings.get("hotkey", "silence_duration", default=0.8)
 
         # Hotkey manager
@@ -373,7 +373,7 @@ class MoShengApp:
             "hotkey", "progressive", default=False
         )
         self._worker.silence_threshold = self._settings.get(
-            "hotkey", "silence_threshold", default=0.05
+            "hotkey", "silence_threshold", default=0.01
         )
         self._worker.silence_duration = self._settings.get(
             "hotkey", "silence_duration", default=0.8

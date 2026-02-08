@@ -178,7 +178,7 @@ class SettingsWindow(QDialog):
         self._threshold_spin.setSingleStep(0.005)
         self._threshold_spin.setDecimals(3)
         self._threshold_spin.setValue(
-            s.get("hotkey", "silence_threshold", default=0.05)
+            s.get("hotkey", "silence_threshold", default=0.01)
         )
         prog_layout.addWidget(self._threshold_spin)
 

@@ -21,7 +21,7 @@ class AudioRecorder:
         self._recording = False
         self._current_rms: float = 0.0
         self._smoothed_rms: float = 0.0
-        self._rms_alpha: float = 0.3  # EMA smoothing factor (lower = smoother)
+        self._rms_alpha: float = 0.6  # EMA smoothing factor (higher = more responsive)
 
     @property
     def is_recording(self) -> bool:
@@ -32,6 +32,8 @@ class AudioRecorder:
             if self._recording:
                 return
             self._buffer.clear()
+            self._smoothed_rms = 0.0
+            self._current_rms = 0.0
             self._recording = True
 
         self._stream = sd.InputStream(

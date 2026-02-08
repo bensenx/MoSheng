@@ -15,6 +15,7 @@ if os.path.isdir(_OLD_SETTINGS_DIR) and not os.path.isdir(SETTINGS_DIR):
     shutil.copytree(_OLD_SETTINGS_DIR, SETTINGS_DIR)
 
 SETTINGS_FILE = os.path.join(SETTINGS_DIR, "settings.json")
+SPEAKER_DIR = os.path.join(SETTINGS_DIR, "speaker")
 VOCABULARY_FILE = os.path.join(SETTINGS_DIR, "vocabulary.csv")
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets")
 
@@ -61,5 +62,11 @@ DEFAULT_SETTINGS = {
     },
     "vocabulary": {
         "enabled": True,
+    },
+    "speaker_verification": {
+        "enabled": False,
+        "threshold": 0.25,
+        "high_threshold": 0.40,
+        "low_threshold": 0.10,
     },
 }

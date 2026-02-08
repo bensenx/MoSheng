@@ -11,7 +11,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QRadioButton, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from config import ASSETS_DIR, VOCABULARY_FILE
@@ -157,6 +157,44 @@ class SettingsWindow(QDialog):
         row2.addWidget(self._toggle_radio)
         row2.addStretch()
         hk_layout.addLayout(row2)
+
+        # Row 3: progressive input toggle
+        self._progressive_toggle = ToggleSwitch(
+            "渐进式输入（停顿时自动输入已识别文本）",
+            checked=s.get("hotkey", "progressive", default=False),
+        )
+        self._progressive_toggle.toggled.connect(self._on_progressive_toggled)
+        hk_layout.addWidget(self._progressive_toggle)
+
+        # Row 4-5: silence threshold + duration (progressive sub-settings)
+        self._progressive_opts = QWidget()
+        prog_layout = QHBoxLayout(self._progressive_opts)
+        prog_layout.setContentsMargins(24, 0, 0, 0)
+        prog_layout.setSpacing(16)
+
+        prog_layout.addWidget(QLabel("静音阈值"))
+        self._threshold_spin = QDoubleSpinBox()
+        self._threshold_spin.setRange(0.005, 0.200)
+        self._threshold_spin.setSingleStep(0.005)
+        self._threshold_spin.setDecimals(3)
+        self._threshold_spin.setValue(
+            s.get("hotkey", "silence_threshold", default=0.05)
+        )
+        prog_layout.addWidget(self._threshold_spin)
+
+        prog_layout.addWidget(QLabel("静音时长(秒)"))
+        self._duration_spin = QDoubleSpinBox()
+        self._duration_spin.setRange(0.3, 3.0)
+        self._duration_spin.setSingleStep(0.1)
+        self._duration_spin.setDecimals(1)
+        self._duration_spin.setValue(
+            s.get("hotkey", "silence_duration", default=0.8)
+        )
+        prog_layout.addWidget(self._duration_spin)
+        prog_layout.addStretch()
+
+        self._progressive_opts.setVisible(self._progressive_toggle.isChecked())
+        hk_layout.addWidget(self._progressive_opts)
 
         main_layout.addWidget(hk_group)
 
@@ -309,6 +347,11 @@ class SettingsWindow(QDialog):
 
         main_layout.addLayout(btn_layout)
 
+    # --- Progressive toggle ---
+
+    def _on_progressive_toggled(self, checked: bool) -> None:
+        self._progressive_opts.setVisible(checked)
+
     # --- Speaker verification ---
 
     def _get_enrollment_status(self) -> str:
@@ -448,6 +491,10 @@ class SettingsWindow(QDialog):
 
             mode = "toggle" if self._toggle_radio.isChecked() else "push_to_talk"
             self._settings.set("mode", mode)
+
+            self._settings.set("hotkey", "progressive", self._progressive_toggle.isChecked())
+            self._settings.set("hotkey", "silence_threshold", self._threshold_spin.value())
+            self._settings.set("hotkey", "silence_duration", self._duration_spin.value())
 
             self._settings.set("asr", "device", self._device_combo.currentText())
 

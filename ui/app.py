@@ -18,7 +18,7 @@ from settings_manager import SettingsManager
 from core.asr_base import ASRBase
 from core.audio_recorder import AudioRecorder
 from core.text_injector import TextInjector
-from core.hotkey_manager import HotkeyManager
+from core.hotkey_manager import DualHotkeyManager
 from ui.overlay_window import (
     OverlayWindow, STATE_RECORDING, STATE_RECOGNIZING,
     STATE_RESULT, STATE_ERROR, STATE_FILTERED, STATE_IDLE,
@@ -107,7 +107,6 @@ class WorkerThread(QThread):
     def _handle_start(self) -> None:
         logger.info("Recording start (progressive=%s)", self._progressive)
         self._recorder.start_recording()
-        self.state_changed.emit(STATE_RECORDING, "")
         if self._settings.get("output", "sound_enabled", default=True):
             import winsound
             threading.Thread(
@@ -236,6 +235,9 @@ class MoShengApp:
         self._settings = settings
         self._speaker_verifier = speaker_verifier
 
+        # Migrate old single-hotkey config to dual-binding format
+        self._migrate_hotkey_settings()
+
         # Audio recorder
         sr = settings.get("audio", "sample_rate", default=16000)
         input_dev = settings.get("audio", "input_device", default=None)
@@ -263,14 +265,17 @@ class MoShengApp:
         self._worker.silence_threshold = settings.get("hotkey", "silence_threshold", default=0.01)
         self._worker.silence_duration = settings.get("hotkey", "silence_duration", default=0.8)
 
-        # Hotkey manager
-        hotkey_keys = settings.get("hotkey", "keys", default=["ctrl", "left windows"])
-        hotkey_mode = settings.get("mode", default="push_to_talk")
-        self._hotkey = HotkeyManager(
-            hotkey_keys=hotkey_keys,
-            on_start=lambda: self._worker.enqueue(CMD_START),
+        # Dual hotkey manager
+        ptt = settings.get("hotkey", "push_to_talk", default={})
+        toggle = settings.get("hotkey", "toggle", default={})
+        self._hotkey = DualHotkeyManager(
+            ptt_keys=ptt.get("keys", ["caps lock"]),
+            ptt_enabled=ptt.get("enabled", True),
+            ptt_long_press_ms=ptt.get("long_press_ms", 300),
+            toggle_keys=toggle.get("keys", ["right ctrl"]),
+            toggle_enabled=toggle.get("enabled", True),
+            on_start=self._on_hotkey_start,
             on_stop=lambda: self._worker.enqueue(CMD_STOP),
-            mode=hotkey_mode,
         )
 
         # Wire hotkey VK codes to the text injector
@@ -306,8 +311,18 @@ class MoShengApp:
         self._worker.start()
         self._tray.show()
 
-        logger.info("MoSheng ready. Hotkey: %s",
-                     self._settings.get("hotkey", "display"))
+        logger.info("MoSheng ready (dual hotkey mode)")
+
+    # ---- Hotkey callbacks (run on hook/timer threads) ----
+
+    def _on_hotkey_start(self) -> None:
+        """Called from hook thread when recording is triggered.
+
+        Immediately emit STATE_RECORDING so the overlay appears without
+        waiting for the worker thread to dequeue and process CMD_START.
+        """
+        self._worker.state_changed.emit(STATE_RECORDING, "")
+        self._worker.enqueue(CMD_START)
 
     # ---- State handling (main thread, via signal) ----
 
@@ -353,12 +368,17 @@ class MoShengApp:
         self._settings_window.show()
 
     def _apply_settings(self) -> None:
-        new_keys = self._settings.get("hotkey", "keys", default=["ctrl", "left windows"])
-        self._hotkey.update_hotkey(new_keys)
+        # Update dual hotkey bindings
+        ptt = self._settings.get("hotkey", "push_to_talk", default={})
+        toggle = self._settings.get("hotkey", "toggle", default={})
+        self._hotkey.update_bindings(
+            ptt_keys=ptt.get("keys", ["caps lock"]),
+            ptt_enabled=ptt.get("enabled", True),
+            ptt_long_press_ms=ptt.get("long_press_ms", 300),
+            toggle_keys=toggle.get("keys", ["right ctrl"]),
+            toggle_enabled=toggle.get("enabled", True),
+        )
         self._injector.hotkey_vks = self._hotkey.hotkey_vks
-
-        new_mode = self._settings.get("mode", default="push_to_talk")
-        self._hotkey.update_mode(new_mode)
 
         self._injector.restore_clipboard = self._settings.get(
             "output", "restore_clipboard", default=True
@@ -396,6 +416,46 @@ class MoShengApp:
                 self._settings.get("speaker_verification", "low_threshold", default=0.10),
             )
         logger.info("Settings applied")
+
+    def _migrate_hotkey_settings(self) -> None:
+        """Migrate old single-hotkey config to dual-binding format."""
+        old_keys = self._settings.get("hotkey", "keys")
+        if old_keys is None:
+            return  # Already new format or fresh install
+
+        old_mode = self._settings.get("mode", default="push_to_talk")
+        old_display = self._settings.get("hotkey", "display", default="")
+
+        # Build new structure: old binding goes to whichever mode was selected
+        if old_mode == "toggle":
+            ptt_cfg = {"enabled": False, "keys": ["caps lock"],
+                       "display": "Caps Lock", "long_press_ms": 300}
+            toggle_cfg = {"enabled": True, "keys": old_keys,
+                          "display": old_display}
+        else:
+            ptt_cfg = {"enabled": True, "keys": old_keys,
+                       "display": old_display, "long_press_ms": 300}
+            toggle_cfg = {"enabled": False, "keys": ["right ctrl"],
+                          "display": "Right Ctrl"}
+
+        self._settings.set("hotkey", "push_to_talk", ptt_cfg)
+        self._settings.set("hotkey", "toggle", toggle_cfg)
+
+        # Remove old fields
+        hotkey_data = self._settings.get("hotkey")
+        if isinstance(hotkey_data, dict):
+            hotkey_data.pop("keys", None)
+            hotkey_data.pop("display", None)
+        # Remove top-level "mode"
+        all_settings = self._settings.all
+        if "mode" in all_settings:
+            # SettingsManager doesn't have a delete, so we set it via internal access
+            # We just leave it; it won't interfere with new code
+            pass
+
+        self._settings.save()
+        logger.info("Migrated old hotkey config (mode=%s) to dual-binding format",
+                     old_mode)
 
     def _load_speaker_verifier(self) -> None:
         """Load speaker verification model on demand (when enabled at runtime)."""

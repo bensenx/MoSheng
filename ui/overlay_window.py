@@ -151,6 +151,13 @@ class OverlayWindow(QWidget):
         self._fade_anim.setEndValue(1.0)
         self._fade_anim.start()
 
+    def _show_instant(self) -> None:
+        """Show overlay immediately without fade animation."""
+        self._fade_anim.stop()
+        self._opacity = 1.0
+        self.setWindowOpacity(1.0)
+        super().show()
+
     def _fade_out(self) -> None:
         self._fade_anim.stop()
         self._fade_anim.setStartValue(self._opacity)
@@ -191,7 +198,10 @@ class OverlayWindow(QWidget):
             self.hide()
             return
 
-        self._fade_in()
+        if state in (STATE_RECORDING, STATE_RECOGNIZING):
+            self._show_instant()
+        else:
+            self._fade_in()
 
         if state == STATE_RECORDING:
             self._label.setStyleSheet(f"color: {COLOR_RECORDING}; background: transparent;")

@@ -9,9 +9,9 @@ import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QButtonGroup, QComboBox, QDialog, QGroupBox,
+    QComboBox, QDialog,
     QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QDoubleSpinBox, QRadioButton, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from config import ASSETS_DIR, VOCABULARY_FILE
@@ -31,11 +31,19 @@ class SettingsWindow(QDialog):
         super().__init__(parent)
         self._settings = settings
         self._on_save = on_save
+        self._input_devices: list[tuple[int | None, str]] = []
+
+        # Hotkey capture state
         self._capturing_hotkey = False
         self._captured_keys: set[str] = set()
         self._hotkey_hook = None
-        self._hotkey_keys: list[str] = []
-        self._input_devices: list[tuple[int | None, str]] = []
+        self._capture_target: str | None = None  # "ptt" or "toggle"
+
+        # Current binding keys (loaded from settings)
+        ptt = settings.get("hotkey", "push_to_talk", default={})
+        toggle = settings.get("hotkey", "toggle", default={})
+        self._ptt_keys: list[str] = list(ptt.get("keys", ["caps lock"]))
+        self._toggle_keys: list[str] = list(toggle.get("keys", ["right ctrl"]))
 
         self.setWindowTitle("MoSheng 设置")
         self.setMinimumWidth(460)
@@ -46,7 +54,6 @@ class SettingsWindow(QDialog):
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setObjectName("settingsRoot")
 
-        # Set window title bar icon
         for ext in ("ico", "png"):
             icon_path = os.path.join(ASSETS_DIR, f"icon.{ext}")
             if os.path.isfile(icon_path):
@@ -59,10 +66,8 @@ class SettingsWindow(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        # Apply DWM Mica backdrop after window has a valid HWND
         hwnd = int(self.winId())
         if not apply_acrylic_effect(hwnd):
-            # Fallback: solid dark background
             self.setObjectName("settingsFallback")
             self.style().unpolish(self)
             self.style().polish(self)
@@ -119,44 +124,61 @@ class SettingsWindow(QDialog):
         hk_layout = QVBoxLayout(hk_group)
         hk_layout.setSpacing(12)
 
-        # Row 1: hotkey display + bind button
-        row1 = QHBoxLayout()
-        row1.addWidget(QLabel("录音快捷键"))
+        ptt = s.get("hotkey", "push_to_talk", default={})
+        toggle = s.get("hotkey", "toggle", default={})
 
-        self._hotkey_keys = list(s.get("hotkey", "keys", default=["ctrl", "left windows"]))
-        self._hotkey_edit = QLineEdit(
-            s.get("hotkey", "display", default="Ctrl + Win")
+        # Row 1: Push-to-talk binding
+        self._ptt_toggle = ToggleSwitch(
+            "按住录音",
+            checked=ptt.get("enabled", True),
         )
-        self._hotkey_edit.setReadOnly(True)
-        self._hotkey_edit.setFixedWidth(160)
-        row1.addWidget(self._hotkey_edit)
+        hk_layout.addWidget(self._ptt_toggle)
 
-        self._bind_btn = QPushButton("修改绑定")
-        self._bind_btn.clicked.connect(self._start_hotkey_capture)
-        row1.addWidget(self._bind_btn)
-        row1.addStretch()
-        hk_layout.addLayout(row1)
+        ptt_row = QHBoxLayout()
+        ptt_row.setContentsMargins(24, 0, 0, 0)
+        ptt_row.addWidget(QLabel("快捷键"))
+        self._ptt_edit = QLineEdit(ptt.get("display", "Caps Lock"))
+        self._ptt_edit.setReadOnly(True)
+        self._ptt_edit.setFixedWidth(160)
+        ptt_row.addWidget(self._ptt_edit)
+        self._ptt_bind_btn = QPushButton("修改绑定")
+        self._ptt_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("ptt"))
+        ptt_row.addWidget(self._ptt_bind_btn)
+        ptt_row.addStretch()
+        hk_layout.addLayout(ptt_row)
 
-        # Row 2: recording mode
-        row2 = QHBoxLayout()
-        row2.addWidget(QLabel("录音模式"))
+        # Long press threshold
+        lp_row = QHBoxLayout()
+        lp_row.setContentsMargins(24, 0, 0, 0)
+        lp_row.addWidget(QLabel("长按阈值"))
+        self._long_press_spin = QSpinBox()
+        self._long_press_spin.setRange(100, 1000)
+        self._long_press_spin.setSingleStep(50)
+        self._long_press_spin.setSuffix(" ms")
+        self._long_press_spin.setValue(ptt.get("long_press_ms", 300))
+        lp_row.addWidget(self._long_press_spin)
+        lp_row.addStretch()
+        hk_layout.addLayout(lp_row)
 
-        self._mode_group = QButtonGroup(self)
-        self._push_radio = QRadioButton("按住录音")
-        self._toggle_radio = QRadioButton("按键切换")
-        self._mode_group.addButton(self._push_radio)
-        self._mode_group.addButton(self._toggle_radio)
+        # Row 2: Toggle binding
+        self._toggle_toggle = ToggleSwitch(
+            "按键切换",
+            checked=toggle.get("enabled", True),
+        )
+        hk_layout.addWidget(self._toggle_toggle)
 
-        current_mode = s.get("mode", default="push_to_talk")
-        if current_mode == "toggle":
-            self._toggle_radio.setChecked(True)
-        else:
-            self._push_radio.setChecked(True)
-
-        row2.addWidget(self._push_radio)
-        row2.addWidget(self._toggle_radio)
-        row2.addStretch()
-        hk_layout.addLayout(row2)
+        toggle_row = QHBoxLayout()
+        toggle_row.setContentsMargins(24, 0, 0, 0)
+        toggle_row.addWidget(QLabel("快捷键"))
+        self._toggle_edit = QLineEdit(toggle.get("display", "Right Ctrl"))
+        self._toggle_edit.setReadOnly(True)
+        self._toggle_edit.setFixedWidth(160)
+        toggle_row.addWidget(self._toggle_edit)
+        self._toggle_bind_btn = QPushButton("修改绑定")
+        self._toggle_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("toggle"))
+        toggle_row.addWidget(self._toggle_bind_btn)
+        toggle_row.addStretch()
+        hk_layout.addLayout(toggle_row)
 
         # Row 3: progressive input toggle
         self._progressive_toggle = ToggleSwitch(
@@ -166,7 +188,7 @@ class SettingsWindow(QDialog):
         self._progressive_toggle.toggled.connect(self._on_progressive_toggled)
         hk_layout.addWidget(self._progressive_toggle)
 
-        # Row 4-5: silence threshold + duration (progressive sub-settings)
+        # Progressive sub-settings
         self._progressive_opts = QWidget()
         prog_layout = QHBoxLayout(self._progressive_opts)
         prog_layout.setContentsMargins(24, 0, 0, 0)
@@ -375,7 +397,6 @@ class SettingsWindow(QDialog):
         dialog = EnrollmentDialog(self._settings, parent=self)
         if dialog.exec():
             self._sv_status_label.setText(self._get_enrollment_status())
-            # Auto-enable and save so verifier loads immediately
             self._sv_toggle.setChecked(True)
             self._on_save_click()
 
@@ -409,20 +430,33 @@ class SettingsWindow(QDialog):
 
     # --- Hotkey capture ---
 
-    def _start_hotkey_capture(self) -> None:
+    def _start_hotkey_capture(self, target: str) -> None:
+        """Start capturing hotkey for 'ptt' or 'toggle' binding."""
         self._capturing_hotkey = True
         self._captured_keys.clear()
-        self._bind_btn.setText("请按下快捷键...")
-        self._bind_btn.setObjectName("dangerButton")
-        self._bind_btn.style().unpolish(self._bind_btn)
-        self._bind_btn.style().polish(self._bind_btn)
-        self._hotkey_edit.setText("等待输入...")
+        self._capture_target = target
+
+        if target == "ptt":
+            btn = self._ptt_bind_btn
+            edit = self._ptt_edit
+        else:
+            btn = self._toggle_bind_btn
+            edit = self._toggle_edit
+
+        btn.setText("请按下快捷键...")
+        btn.setObjectName("dangerButton")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        edit.setText("等待输入...")
         self._hotkey_hook = keyboard.hook(self._on_capture_key, suppress=False)
 
     def _on_capture_key(self, event: keyboard.KeyboardEvent) -> None:
         """Called from the keyboard library's thread."""
         if not self._capturing_hotkey:
             return
+
+        target = self._capture_target
+        edit = self._ptt_edit if target == "ptt" else self._toggle_edit
 
         if event.event_type == keyboard.KEY_DOWN:
             self._captured_keys.add(event.name.lower())
@@ -431,7 +465,7 @@ class SettingsWindow(QDialog):
                 for k in sorted(self._captured_keys)
             )
             QMetaObject.invokeMethod(
-                self._hotkey_edit, "setText",
+                edit, "setText",
                 Qt.ConnectionType.QueuedConnection,
                 Q_ARG(str, display),
             )
@@ -442,24 +476,36 @@ class SettingsWindow(QDialog):
                 keyboard.unhook(self._hotkey_hook)
                 self._hotkey_hook = None
 
-                self._hotkey_keys = sorted(self._captured_keys)
+                keys = sorted(self._captured_keys)
                 display = " + ".join(
                     k.capitalize() if len(k) > 1 else k.upper()
-                    for k in self._hotkey_keys
+                    for k in keys
                 )
+
+                if target == "ptt":
+                    self._ptt_keys = keys
+                else:
+                    self._toggle_keys = keys
+
                 QMetaObject.invokeMethod(
                     self, "_finish_capture",
                     Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, display),
+                    Q_ARG(str, target), Q_ARG(str, display),
                 )
 
-    @Slot(str)
-    def _finish_capture(self, display: str) -> None:
-        self._hotkey_edit.setText(display)
-        self._bind_btn.setText("修改绑定")
-        self._bind_btn.setObjectName("")
-        self._bind_btn.style().unpolish(self._bind_btn)
-        self._bind_btn.style().polish(self._bind_btn)
+    @Slot(str, str)
+    def _finish_capture(self, target: str, display: str) -> None:
+        if target == "ptt":
+            self._ptt_edit.setText(display)
+            btn = self._ptt_bind_btn
+        else:
+            self._toggle_edit.setText(display)
+            btn = self._toggle_bind_btn
+
+        btn.setText("修改绑定")
+        btn.setObjectName("")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
 
     # --- Vocabulary ---
 
@@ -477,7 +523,6 @@ class SettingsWindow(QDialog):
             os.makedirs(os.path.dirname(VOCABULARY_FILE), exist_ok=True)
             with open(VOCABULARY_FILE, "w", encoding="utf-8") as f:
                 f.write("# 每行一个词汇（专业术语、人名等），帮助语音识别更准确\n")
-        # Open the folder and select the file in Explorer
         import subprocess
         subprocess.Popen(["explorer", "/select,", VOCABULARY_FILE])
 
@@ -485,12 +530,20 @@ class SettingsWindow(QDialog):
 
     def _on_save_click(self) -> None:
         try:
-            display = self._hotkey_edit.text()
-            self._settings.set("hotkey", "keys", self._hotkey_keys)
-            self._settings.set("hotkey", "display", display)
+            # Push-to-talk binding
+            self._settings.set("hotkey", "push_to_talk", {
+                "enabled": self._ptt_toggle.isChecked(),
+                "keys": self._ptt_keys,
+                "display": self._ptt_edit.text(),
+                "long_press_ms": self._long_press_spin.value(),
+            })
 
-            mode = "toggle" if self._toggle_radio.isChecked() else "push_to_talk"
-            self._settings.set("mode", mode)
+            # Toggle binding
+            self._settings.set("hotkey", "toggle", {
+                "enabled": self._toggle_toggle.isChecked(),
+                "keys": self._toggle_keys,
+                "display": self._toggle_edit.text(),
+            })
 
             self._settings.set("hotkey", "progressive", self._progressive_toggle.isChecked())
             self._settings.set("hotkey", "silence_threshold", self._threshold_spin.value())
@@ -511,7 +564,8 @@ class SettingsWindow(QDialog):
             self._settings.set("speaker_verification", "enabled", self._sv_toggle.isChecked())
 
             self._settings.save()
-            logger.info("Settings saved: mode=%s, hotkey=%s", mode, self._hotkey_keys)
+            logger.info("Settings saved: ptt=%s, toggle=%s",
+                         self._ptt_keys, self._toggle_keys)
 
             if self._on_save:
                 self._on_save()

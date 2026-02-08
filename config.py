@@ -38,13 +38,21 @@ if os.path.isfile(SETTINGS_FILE) and not os.path.isfile(VOCABULARY_FILE):
 # Default settings
 DEFAULT_SETTINGS = {
     "hotkey": {
-        "keys": ["ctrl", "left windows"],
-        "display": "Ctrl + Win",
+        "push_to_talk": {
+            "enabled": True,
+            "keys": ["caps lock"],
+            "display": "Caps Lock",
+            "long_press_ms": 300,
+        },
+        "toggle": {
+            "enabled": True,
+            "keys": ["right ctrl"],
+            "display": "Right Ctrl",
+        },
         "progressive": False,
         "silence_threshold": 0.01,
         "silence_duration": 0.8,
     },
-    "mode": "push_to_talk",
     "asr": {
         "model_name": "Qwen3-ASR-1.7B",
         "model_id": "Qwen/Qwen3-ASR-1.7B",

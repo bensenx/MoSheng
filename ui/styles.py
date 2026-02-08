@@ -35,6 +35,7 @@ COLOR_RECORDING = "#f38ba8"
 COLOR_RECOGNIZING = "#f9e2af"
 COLOR_RESULT = "#a6e3a1"
 COLOR_ERROR = "#f38ba8"
+COLOR_FILTERED = "#6c7086"     # Muted grey for silent filter
 COLOR_IDLE_TRAY = "#6c7086"
 
 # Overlay background

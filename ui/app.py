@@ -19,7 +19,7 @@ from core.text_injector import TextInjector
 from core.hotkey_manager import HotkeyManager
 from ui.overlay_window import (
     OverlayWindow, STATE_RECORDING, STATE_RECOGNIZING,
-    STATE_RESULT, STATE_ERROR, STATE_IDLE,
+    STATE_RESULT, STATE_ERROR, STATE_FILTERED, STATE_IDLE,
 )
 
 logger = logging.getLogger(__name__)

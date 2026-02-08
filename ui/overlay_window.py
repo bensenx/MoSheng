@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from ui.styles import (
-    COLOR_BORDER, COLOR_ERROR, COLOR_OVERLAY_BG, COLOR_OVERLAY_TEXT,
+    COLOR_BORDER, COLOR_ERROR, COLOR_FILTERED, COLOR_OVERLAY_BG, COLOR_OVERLAY_TEXT,
     COLOR_RECORDING, COLOR_RECOGNIZING, COLOR_RESULT, FONT_FAMILY,
 )
 
@@ -22,6 +22,7 @@ STATE_RECORDING = "recording"
 STATE_RECOGNIZING = "recognizing"
 STATE_RESULT = "result"
 STATE_ERROR = "error"
+STATE_FILTERED = "filtered"
 
 # Windows extended window style flags
 WS_EX_LAYERED = 0x80000
@@ -209,6 +210,11 @@ class OverlayWindow(QWidget):
             display = text if len(text) <= 30 else text[:28] + "..."
             self._label.setText(display)
             QTimer.singleShot(self.RESULT_DISPLAY_MS, self.hide)
+
+        elif state == STATE_FILTERED:
+            self._label.setStyleSheet(f"color: {COLOR_FILTERED}; background: transparent;")
+            self._label.setText("已过滤")
+            QTimer.singleShot(1000, self.hide)
 
     # --- Animation ---
 

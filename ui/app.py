@@ -47,6 +47,14 @@ class WorkerThread(QThread):
         self._hotword_context: str = ""
 
     @property
+    def speaker_verifier(self):
+        return self._speaker_verifier
+
+    @speaker_verifier.setter
+    def speaker_verifier(self, value) -> None:
+        self._speaker_verifier = value
+
+    @property
     def hotword_context(self) -> str:
         return self._hotword_context
 
@@ -253,6 +261,16 @@ class MoShengApp:
             "audio", "input_device", default=None
         )
         self._worker.hotword_context = self._build_hotword_context()
+
+        # Speaker verification: lazy load/unload on toggle change
+        sv_enabled = self._settings.get("speaker_verification", "enabled", default=False)
+        if sv_enabled and self._speaker_verifier is None:
+            self._load_speaker_verifier()
+        elif not sv_enabled and self._speaker_verifier is not None:
+            self._speaker_verifier.unload_model()
+            self._speaker_verifier = None
+            self._worker.speaker_verifier = None
+            logger.info("Speaker verifier unloaded (disabled)")
         if self._speaker_verifier is not None:
             self._speaker_verifier.update_thresholds(
                 self._settings.get("speaker_verification", "threshold", default=0.25),
@@ -260,6 +278,20 @@ class MoShengApp:
                 self._settings.get("speaker_verification", "low_threshold", default=0.10),
             )
         logger.info("Settings applied")
+
+    def _load_speaker_verifier(self) -> None:
+        """Load speaker verification model on demand (when enabled at runtime)."""
+        from config import SPEAKER_DIR
+        from core.speaker_verifier import SpeakerVerifier
+
+        device = self._settings.get("asr", "device", default="cuda:0")
+        verifier = SpeakerVerifier(device=device)
+        verifier.load_model()
+        verifier.load_enrollment(SPEAKER_DIR)
+
+        self._speaker_verifier = verifier
+        self._worker.speaker_verifier = verifier
+        logger.info("Speaker verifier loaded on demand")
 
     def _build_hotword_context(self) -> str:
         enabled = self._settings.get("vocabulary", "enabled", default=True)

@@ -440,15 +440,45 @@ class ToggleSwitch(QWidget):
 
 
 # ---------------------------------------------------------------------------
+# App icon loader (high-DPI)
+# ---------------------------------------------------------------------------
+
+_ICON_SCALE = 4  # Render at 4x logical size — crisp on any DPI (1x–4x)
+
+
+def load_icon_pixmap(logical_size: int) -> QPixmap | None:
+    """Load the app icon as a high-DPI QPixmap at *logical_size* px.
+
+    The icon is rendered at 4x physical resolution and tagged with the
+    matching devicePixelRatio so Qt displays it at the correct logical size.
+    Prefers PNG (2048x2048 source) over ICO for best quality.
+    """
+    import os
+    from config import ASSETS_DIR
+
+    for ext in ("png", "ico"):
+        path = os.path.join(ASSETS_DIR, f"icon.{ext}")
+        if os.path.isfile(path):
+            physical = logical_size * _ICON_SCALE
+            pm = QPixmap(path).scaled(
+                physical, physical,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            pm.setDevicePixelRatio(_ICON_SCALE)
+            return pm
+    return None
+
+
+# ---------------------------------------------------------------------------
 # Section icons (QPainter line art)
 # ---------------------------------------------------------------------------
 
 def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> QPixmap:
-    """Draw a line-art icon at 2x resolution for crisp high-DPI display."""
-    scale = 2
-    ps = size * scale  # pixel size for rendering
+    """Draw a line-art icon at high resolution for crisp high-DPI display."""
+    ps = size * _ICON_SCALE
     pixmap = QPixmap(ps, ps)
-    pixmap.setDevicePixelRatio(scale)
+    pixmap.setDevicePixelRatio(_ICON_SCALE)
     pixmap.fill(QColor(0, 0, 0, 0))
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)

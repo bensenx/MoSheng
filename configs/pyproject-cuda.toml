@@ -11,7 +11,6 @@ dependencies = [
     "keyboard>=0.13.5",
     "pywin32>=306",
     "PySide6>=6.7",
-    "speechbrain>=1.0",
 ]
 
 [tool.uv]
@@ -31,11 +30,6 @@ torch = { index = "pytorch-cu128" }
 
 [tool.hatch.build.targets.wheel]
 packages = ["core", "ui", "utils"]
-
-[dependency-groups]
-dev = [
-    "pyinstaller>=6.0",
-]
 
 [build-system]
 requires = ["hatchling"]

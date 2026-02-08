@@ -20,10 +20,12 @@ uv run --project E:\VoiceInput python E:\VoiceInput\main.py
 ## 项目结构
 
 ```
-main.py                 入口：环境检查 → 模型加载 → QApplication 事件循环
+main.py                 入口：单实例互斥锁 → QApplication → 加载界面 → 环境检查 → 模型加载 → 事件循环
 config.py               默认配置常量（含 input_device）
 settings_manager.py     用户设置持久化 (~/.mosheng/settings.json)
 pyproject.toml          UV 项目配置（依赖、CUDA 索引、构建）
+launcher.py             分发包入口（仅 stdlib，PyInstaller 编译为 MoSheng.exe）
+_setup.cmd              首次运行安装脚本（GPU 检测、镜像选择、uv sync）
 core/
   asr_base.py           ASR 抽象基类 (ABC)，可替换模型
   asr_qwen.py           Qwen3-ASR-1.7B 实现（含音频诊断日志）
@@ -32,11 +34,19 @@ core/
   hotkey_manager.py     全局快捷键，支持 push_to_talk / toggle 两种模式
 ui/
   app.py                QSystemTrayIcon + WorkerThread 组件协调器（核心调度）
+  splash_screen.py      启动加载界面（glassmorphism，模型加载期间显示）
   overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果），click-through + fade animation
   settings_window.py    QDialog 设置界面（Glassmorphism + DWM Acrylic backdrop）
-  styles.py             Glassmorphism QSS + 颜色常量 + ToggleSwitch + IconGroupBox + draw_section_icon
+  styles.py             Glassmorphism QSS + 颜色常量 + ToggleSwitch + load_icon_pixmap + draw_section_icon
 utils/
   logger.py             日志配置
+configs/
+  pyproject-cuda.toml   CUDA 版 pyproject（cu128 索引）
+  pyproject-cpu.toml    CPU 版 pyproject（PyPI torch）
+  uv-cuda.lock          CUDA 版锁文件
+  uv-cpu.lock           CPU 版锁文件
+scripts/
+  build_dist.py         构建分发包（PyInstaller + 源码复制 + uv.exe）
 ```
 
 ## 设置项
@@ -48,6 +58,33 @@ utils/
 | 音频输入 | 麦克风设备选择 | ✓ |
 | 输出 | 提示音、悬浮窗、剪贴板恢复 | ✓ |
 | 词汇 | 自定义词汇表、CSV/TXT 导入 | ✓ |
+
+## 分发包
+
+### 构建
+
+```bash
+uv run python scripts/build_dist.py
+```
+
+产出 `dist/MoSheng/`（~70MB），包含：
+- `MoSheng.exe` — PyInstaller 编译的 launcher（仅 stdlib，~7MB）
+- `uv.exe` — 包管理器（~57MB）
+- 源码（main.py, core/, ui/, utils/, assets/）
+- `_setup.cmd` + `configs/` — 首次运行安装
+
+### 用户运行流程
+
+1. 双击 `MoSheng.exe`
+2. Launcher 检查 `.venv/.mosheng_version`，不匹配则运行 `_setup.cmd`
+3. `_setup.cmd`：GPU 检测 → 选择 CUDA/CPU pyproject.toml → `uv sync`
+4. Launcher 启动 `pythonw.exe main.py`（无控制台）
+
+### 分发包注意事项
+
+- `_setup.cmd` 必须纯 ASCII（cmd.exe 用系统代码页 GBK 解析，UTF-8 中文会错位）
+- `if errorlevel 1 goto :label` 比 `if !ERRORLEVEL! NEQ 0` 更可靠
+- 版本更新时同步 `launcher.py:CURRENT_VERSION` 和 `_setup.cmd` 写入的版本号
 
 ## 线程模型
 
@@ -70,6 +107,9 @@ utils/
 - Overlay click-through 用 `winId()` 直接获取 HWND + Windows API `SetWindowLongW`
 - `Qt.WA_TranslucentBackground` + `paintEvent` 中 `QPainter.drawRoundedRect` 实现圆角透明窗口
 - QSS 样式表集中在 `ui/styles.py`，全局应用于 `QApplication`
+- 统一图标渲染：`load_icon_pixmap(logical_size)` 以 4x 物理像素加载，适配 1x–4x DPI
+- Splash screen 不用 DWM Acrylic（会产生系统边框），仅 `WA_TranslucentBackground` + `paintEvent`
+- Splash 直接设 `setWindowOpacity(1.0)`，主线程阻塞时 fade-in 动画不运行
 
 ### keyboard 库
 - hook 回调跑在 keyboard 自己的线程上，修改共享状态需加锁
@@ -84,6 +124,11 @@ utils/
 ### PyTorch
 - `torch.cuda.get_device_properties(0).total_memory`（不是 `total_mem`）
 - Python 3.14 暂无 PyTorch CUDA wheels（截至 2026-02）
+
+### 启动流程（main.py）
+- 单实例保护：`CreateMutexW("MoSheng_SingleInstance")` + `GetLastError() == 183`
+- QApplication 在模型加载**之前**创建，以便显示 splash screen
+- 模型加载在主线程阻塞，splash 保持可见但动画暂停（已足够提供视觉反馈）
 
 ### 通用
 - 跨类访问用公开属性/方法，不直接读写 `_private` 成员

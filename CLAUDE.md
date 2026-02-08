@@ -22,6 +22,7 @@ uv run --project E:\VoiceInput python E:\VoiceInput\main.py
 ```
 main.py                 入口：单实例互斥锁 → QApplication → 加载界面 → 环境检查 → 模型加载 → 事件循环
 config.py               默认配置常量（含 input_device）
+i18n.py                 国际化：73 个翻译键（zh/en），tr() 查找 + 系统语言自动检测
 settings_manager.py     用户设置持久化 (~/.mosheng/settings.json)
 pyproject.toml          UV 项目配置（依赖、CUDA 索引、构建）
 launcher.py             分发包入口（仅 stdlib，PyInstaller 编译为 MoSheng.exe）
@@ -57,6 +58,7 @@ scripts/
 | 分类 | 项目 | 运行时热更新 |
 |------|------|:---:|
 | 快捷键 | 按键组合、录音模式（按住/切换）、渐进式输入、静音阈值/时长 | ✓ |
+| 语言 | 界面语言（中文/English） | ✗ 需重启 |
 | 语音识别 | ASR 模型、GPU 设备 | ✗ 需重启 |
 | 音频输入 | 麦克风设备选择 | ✓ |
 | 输出 | 提示音、悬浮窗、剪贴板恢复 | ✓ |
@@ -123,7 +125,7 @@ uv run python scripts/build_dist.py
 - Overlay click-through 用 `winId()` 直接获取 HWND + Windows API `SetWindowLongW`
 - `Qt.WA_TranslucentBackground` + `paintEvent` 中 `QPainter.drawRoundedRect` 实现圆角透明窗口
 - QSS 样式表集中在 `ui/styles.py`，全局应用于 `QApplication`
-- 统一图标渲染：`load_icon_pixmap(logical_size)` 以 4x 物理像素加载，适配 1x–4x DPI
+- 统一图标渲染：`load_icon_pixmap(logical_size)` + `draw_section_icon()` 以屏幕实际 DPR 渲染（`_screen_dpr()`），避免非整数缩放模糊
 - Splash screen 不用 DWM Acrylic（会产生系统边框），仅 `WA_TranslucentBackground` + `paintEvent`
 - Splash 直接设 `setWindowOpacity(1.0)`，主线程阻塞时 fade-in 动画不运行
 
@@ -148,9 +150,18 @@ uv run python scripts/build_dist.py
 - `torch.cuda.get_device_properties(0).total_memory`（不是 `total_mem`）
 - Python 3.14 暂无 PyTorch CUDA wheels（截至 2026-02）
 
+### 国际化 (i18n.py)
+- 简单 Python 字典方案：`_TRANSLATIONS[key][lang]`，无外部依赖
+- `tr(key, **kwargs)` 查找翻译 + `str.format()`，回退链：当前语言 → zh → key 字符串
+- `init_language(settings_manager)` 在启动时调用：从设置读取，首次运行用 `QLocale.system().name()` 自动检测
+- 语言切换需重启（保存时弹出双语 `QMessageBox` 提示），避免运行时全量刷新 UI 的复杂度
+- 模块级常量（如 `PROMPTS` 列表）不可在导入时调用 `tr()`，须改为函数延迟求值（如 `_get_prompts()`）
+- `speaker_verifier.py` 中用局部 `from i18n import tr` 而非顶层导入，因为 speechbrain import 是延迟的
+
 ### 启动流程（main.py）
 - 单实例保护：`CreateMutexW("MoSheng_SingleInstance")` + `GetLastError() == 183`
 - QApplication 在模型加载**之前**创建，以便显示 splash screen
+- `SettingsManager()` + `init_language()` 在 splash 之前初始化，确保后续 `tr()` 可用
 - 模型加载在主线程阻塞，splash 保持可见但动画暂停（已足够提供视觉反馈）
 
 ### 声纹识别 (speaker_verifier.py)

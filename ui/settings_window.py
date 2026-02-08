@@ -14,7 +14,8 @@ from PySide6.QtWidgets import (
     QDoubleSpinBox, QSpinBox, QVBoxLayout, QWidget,
 )
 
-from config import ASSETS_DIR, VOCABULARY_FILE
+from config import ASSETS_DIR, ASR_MODELS, VOCABULARY_FILE
+from utils.autostart import is_autostart_enabled, set_autostart
 from i18n import tr, get_language, SUPPORTED_LANGUAGES
 from settings_manager import SettingsManager
 from ui.styles import (
@@ -47,7 +48,7 @@ class SettingsWindow(QDialog):
         self._toggle_keys: list[str] = list(toggle.get("keys", ["right ctrl"]))
 
         self.setWindowTitle(tr("settings.title"))
-        self.setMinimumWidth(460)
+        self.setMinimumWidth(560)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
@@ -120,7 +121,7 @@ class SettingsWindow(QDialog):
         main_layout.addLayout(header)
         main_layout.addSpacing(8)
 
-        # --- Language Selector ---
+        # --- Language & Autostart (merged row) ---
         lang_row = QHBoxLayout()
         lang_row.addWidget(QLabel(tr("settings.language_label")))
         self._lang_combo = QComboBox()
@@ -136,40 +137,48 @@ class SettingsWindow(QDialog):
         restart_hint.setObjectName("secondaryLabel")
         lang_row.addWidget(restart_hint)
         lang_row.addStretch()
+        self._autostart_toggle = ToggleSwitch(
+            tr("settings.autostart"),
+            checked=is_autostart_enabled(),
+        )
+        lang_row.addWidget(self._autostart_toggle)
         main_layout.addLayout(lang_row)
         main_layout.addSpacing(4)
 
-        # --- Hotkey Section ---
+        # --- Hotkey Section (two-column PTT / Toggle) ---
         hk_group = IconGroupBox(tr("settings.hotkey_section"), "keyboard")
         hk_layout = QVBoxLayout(hk_group)
-        hk_layout.setSpacing(12)
+        hk_layout.setSpacing(8)
 
         ptt = s.get("hotkey", "push_to_talk", default={})
         toggle = s.get("hotkey", "toggle", default={})
 
-        # Row 1: Push-to-talk binding
+        # Two-column layout
+        columns = QHBoxLayout()
+        columns.setSpacing(16)
+
+        # -- Left column: Push-to-talk --
+        ptt_col = QVBoxLayout()
+        ptt_col.setSpacing(6)
+
         self._ptt_toggle = ToggleSwitch(
             tr("settings.push_to_talk"),
             checked=ptt.get("enabled", True),
         )
-        hk_layout.addWidget(self._ptt_toggle)
+        ptt_col.addWidget(self._ptt_toggle)
 
-        ptt_row = QHBoxLayout()
-        ptt_row.setContentsMargins(24, 0, 0, 0)
-        ptt_row.addWidget(QLabel(tr("settings.hotkey_label")))
+        ptt_key_row = QHBoxLayout()
+        ptt_key_row.addWidget(QLabel(tr("settings.hotkey_label")))
         self._ptt_edit = QLineEdit(ptt.get("display", "Caps Lock"))
         self._ptt_edit.setReadOnly(True)
-        self._ptt_edit.setFixedWidth(160)
-        ptt_row.addWidget(self._ptt_edit)
+        self._ptt_edit.setFixedWidth(120)
+        ptt_key_row.addWidget(self._ptt_edit)
         self._ptt_bind_btn = QPushButton(tr("settings.change_binding"))
         self._ptt_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("ptt"))
-        ptt_row.addWidget(self._ptt_bind_btn)
-        ptt_row.addStretch()
-        hk_layout.addLayout(ptt_row)
+        ptt_key_row.addWidget(self._ptt_bind_btn)
+        ptt_col.addLayout(ptt_key_row)
 
-        # Long press threshold
         lp_row = QHBoxLayout()
-        lp_row.setContentsMargins(24, 0, 0, 0)
         lp_row.addWidget(QLabel(tr("settings.long_press_threshold")))
         self._long_press_spin = QSpinBox()
         self._long_press_spin.setRange(100, 1000)
@@ -178,29 +187,37 @@ class SettingsWindow(QDialog):
         self._long_press_spin.setValue(ptt.get("long_press_ms", 300))
         lp_row.addWidget(self._long_press_spin)
         lp_row.addStretch()
-        hk_layout.addLayout(lp_row)
+        ptt_col.addLayout(lp_row)
 
-        # Row 2: Toggle binding
+        columns.addLayout(ptt_col)
+
+        # -- Right column: Toggle --
+        toggle_col = QVBoxLayout()
+        toggle_col.setSpacing(6)
+
         self._toggle_toggle = ToggleSwitch(
             tr("settings.toggle_mode"),
             checked=toggle.get("enabled", True),
         )
-        hk_layout.addWidget(self._toggle_toggle)
+        toggle_col.addWidget(self._toggle_toggle)
 
-        toggle_row = QHBoxLayout()
-        toggle_row.setContentsMargins(24, 0, 0, 0)
-        toggle_row.addWidget(QLabel(tr("settings.hotkey_label")))
+        toggle_key_row = QHBoxLayout()
+        toggle_key_row.addWidget(QLabel(tr("settings.hotkey_label")))
         self._toggle_edit = QLineEdit(toggle.get("display", "Right Ctrl"))
         self._toggle_edit.setReadOnly(True)
-        self._toggle_edit.setFixedWidth(160)
-        toggle_row.addWidget(self._toggle_edit)
+        self._toggle_edit.setFixedWidth(120)
+        toggle_key_row.addWidget(self._toggle_edit)
         self._toggle_bind_btn = QPushButton(tr("settings.change_binding"))
         self._toggle_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("toggle"))
-        toggle_row.addWidget(self._toggle_bind_btn)
-        toggle_row.addStretch()
-        hk_layout.addLayout(toggle_row)
+        toggle_key_row.addWidget(self._toggle_bind_btn)
+        toggle_col.addLayout(toggle_key_row)
 
-        # Row 3: progressive input toggle
+        toggle_col.addStretch()
+        columns.addLayout(toggle_col)
+
+        hk_layout.addLayout(columns)
+
+        # -- Progressive input (full width, below columns) --
         self._progressive_toggle = ToggleSwitch(
             tr("settings.progressive_input"),
             checked=s.get("hotkey", "progressive", default=False),
@@ -247,10 +264,17 @@ class SettingsWindow(QDialog):
 
         row3 = QHBoxLayout()
         row3.addWidget(QLabel(tr("settings.asr_model")))
-        model_combo = QComboBox()
-        model_combo.addItem("Qwen3-ASR-1.7B")
-        model_combo.setEnabled(False)
-        row3.addWidget(model_combo)
+        self._model_combo = QComboBox()
+        current_model_id = s.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
+        for m in ASR_MODELS:
+            self._model_combo.addItem(m["model_name"], m["model_id"])
+        idx = self._model_combo.findData(current_model_id)
+        if idx >= 0:
+            self._model_combo.setCurrentIndex(idx)
+        row3.addWidget(self._model_combo)
+        restart_hint_model = QLabel(tr("settings.restart_hint"))
+        restart_hint_model.setObjectName("secondaryLabel")
+        row3.addWidget(restart_hint_model)
         row3.addStretch()
         asr_layout.addLayout(row3)
 
@@ -319,10 +343,10 @@ class SettingsWindow(QDialog):
 
         main_layout.addWidget(sv_group)
 
-        # --- Output Section ---
+        # --- Output Section (horizontal toggles) ---
         out_group = IconGroupBox(tr("settings.output_section"), "gear")
-        out_layout = QVBoxLayout(out_group)
-        out_layout.setSpacing(10)
+        out_layout = QHBoxLayout(out_group)
+        out_layout.setSpacing(16)
 
         self._sound_toggle = ToggleSwitch(
             tr("settings.sound_toggle"),
@@ -341,6 +365,7 @@ class SettingsWindow(QDialog):
             checked=s.get("output", "restore_clipboard", default=True),
         )
         out_layout.addWidget(self._restore_toggle)
+        out_layout.addStretch()
 
         main_layout.addWidget(out_group)
 
@@ -549,6 +574,8 @@ class SettingsWindow(QDialog):
     # --- Save / Cancel ---
 
     def _on_save_click(self) -> None:
+        lang_changed = False
+        model_changed = False
         try:
             # Push-to-talk binding
             self._settings.set("hotkey", "push_to_talk", {
@@ -569,6 +596,13 @@ class SettingsWindow(QDialog):
             self._settings.set("hotkey", "silence_threshold", self._threshold_spin.value())
             self._settings.set("hotkey", "silence_duration", self._duration_spin.value())
 
+            # ASR model
+            old_model_id = self._settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
+            new_model_id = self._model_combo.currentData()
+            self._settings.set("asr", "model_id", new_model_id)
+            self._settings.set("asr", "model_name", self._model_combo.currentText())
+            model_changed = new_model_id != old_model_id
+
             self._settings.set("asr", "device", self._device_combo.currentText())
 
             mic_idx = self._mic_combo.currentIndex()
@@ -582,6 +616,9 @@ class SettingsWindow(QDialog):
             self._settings.set("vocabulary", "enabled", self._vocab_toggle.isChecked())
 
             self._settings.set("speaker_verification", "enabled", self._sv_toggle.isChecked())
+
+            # Autostart (writes registry directly)
+            set_autostart(self._autostart_toggle.isChecked())
 
             new_lang = self._lang_combo.currentData()
             lang_changed = new_lang != get_language()
@@ -598,10 +635,10 @@ class SettingsWindow(QDialog):
 
         self.close()
 
-        if lang_changed:
+        if lang_changed or model_changed:
+            msg = tr("settings.restart_required") if lang_changed else tr("settings.restart_required_model")
             QMessageBox.information(
-                None, tr("settings.title"),
-                tr("settings.restart_required"),
+                None, tr("settings.title"), msg,
             )
 
     def closeEvent(self, event) -> None:

@@ -29,6 +29,18 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "程序发生未处理的异常，请查看日志文件。",
         "en": "An unhandled exception occurred. Please check the log file.",
     },
+    "error.model_download_failed": {
+        "zh": "模型下载失败:\n{error}",
+        "en": "Model download failed:\n{error}",
+    },
+    "splash.downloading_model": {
+        "zh": "正在下载模型 {name}...",
+        "en": "Downloading model {name}...",
+    },
+    "splash.download_progress": {
+        "zh": "正在下载模型... {percent}%",
+        "en": "Downloading model... {percent}%",
+    },
 
     # ---- ui/app.py (WorkerThread) ----
     "worker.no_content": {
@@ -250,6 +262,23 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     "settings.vocab_file_header": {
         "zh": "# 每行一个词汇（专业术语、人名等），帮助语音识别更准确\n",
         "en": "# One term per line (technical terms, names, etc.) to improve recognition accuracy\n",
+    },
+    # -- General --
+    "settings.general_section": {
+        "zh": "通用",
+        "en": "General",
+    },
+    "settings.autostart": {
+        "zh": "开机自动启动",
+        "en": "Start at login",
+    },
+    "settings.autostart_hint": {
+        "zh": "登录 Windows 时自动启动墨声",
+        "en": "Automatically start MoSheng when you log in",
+    },
+    "settings.restart_required_model": {
+        "zh": "ASR 模型已更改，需要重启应用生效。\nThe ASR model has changed. Please restart to apply.",
+        "en": "ASR 模型已更改，需要重启应用生效。\nThe ASR model has changed. Please restart to apply.",
     },
     # -- Buttons --
     "settings.save": {

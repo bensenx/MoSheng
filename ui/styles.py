@@ -579,6 +579,17 @@ def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> Q
         p.drawLine(QPointF(cx - s * 0.15, s * 0.50), QPointF(cx - s * 0.02, s * 0.63))
         p.drawLine(QPointF(cx - s * 0.02, s * 0.63), QPointF(cx + s * 0.18, s * 0.38))
 
+    elif name == "power":
+        cx = s / 2
+        r = s * 0.32
+        # Arc (open at the top, ~300 degrees)
+        arc_rect = QRectF(cx - r, s * 0.5 - r, r * 2, r * 2)
+        start_angle = 60 * 16   # 60 degrees from 3-o'clock (= top-right gap)
+        span_angle = 240 * 16   # 240 degrees clockwise
+        p.drawArc(arc_rect.toRect(), start_angle, span_angle)
+        # Vertical line at top
+        p.drawLine(QPointF(cx, s * 0.10), QPointF(cx, s * 0.45))
+
     p.end()
     return pixmap
 

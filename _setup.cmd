@@ -42,6 +42,23 @@ if "!_HAS_MIRROR!"=="0" (
     echo.
 )
 
+:: ---- ASR model selection ----
+echo Select ASR model:
+echo   [1] Qwen3-ASR-1.7B (default, ~4GB download, 6GB+ VRAM recommended)
+echo   [2] Qwen3-ASR-0.6B (compact, ~1.8GB download, 3GB+ VRAM recommended)
+echo.
+choice /c 12 /t 15 /d 1 /m "Enter 1 or 2 (15s auto-select 1): "
+if !ERRORLEVEL! EQU 2 (
+    set "MOSHENG_MODEL_ID=Qwen/Qwen3-ASR-0.6B"
+    set "MOSHENG_MODEL_NAME=Qwen3-ASR-0.6B"
+    echo [*] Selected: Qwen3-ASR-0.6B
+) else (
+    set "MOSHENG_MODEL_ID=Qwen/Qwen3-ASR-1.7B"
+    set "MOSHENG_MODEL_NAME=Qwen3-ASR-1.7B"
+    echo [*] Selected: Qwen3-ASR-1.7B
+)
+echo.
+
 :: ---- Check required files ----
 if not exist "uv.exe" (
     echo [ERROR] uv.exe not found!
@@ -98,6 +115,13 @@ echo ================================================
 goto :fail
 
 :uv_ok
+
+:: Write initial model selection to settings (only if no settings exist yet)
+if not exist "%USERPROFILE%\.mosheng" mkdir "%USERPROFILE%\.mosheng"
+if not exist "%USERPROFILE%\.mosheng\settings.json" (
+    > "%USERPROFILE%\.mosheng\settings.json" echo {"asr":{"model_name":"!MOSHENG_MODEL_NAME!","model_id":"!MOSHENG_MODEL_ID!"}}
+    >> "%LOGFILE%" echo Model selection saved: !MOSHENG_MODEL_NAME!
+)
 
 :: Write version marker
 > ".venv\.mosheng_version" echo 1.0.0

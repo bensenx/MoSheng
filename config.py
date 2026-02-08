@@ -35,9 +35,19 @@ if os.path.isfile(SETTINGS_FILE) and not os.path.isfile(VOCABULARY_FILE):
     except Exception:
         pass
 
+# Copy default vocabulary if no vocabulary.csv exists yet
+if not os.path.isfile(VOCABULARY_FILE):
+    _default_vocab = os.path.join(ASSETS_DIR, "default_vocabulary.csv")
+    if os.path.isfile(_default_vocab):
+        os.makedirs(SETTINGS_DIR, exist_ok=True)
+        shutil.copy2(_default_vocab, VOCABULARY_FILE)
+
 # Default settings
 DEFAULT_SETTINGS = {
     "language": None,
+    "general": {
+        "autostart": False,
+    },
     "hotkey": {
         "push_to_talk": {
             "enabled": True,
@@ -82,3 +92,9 @@ DEFAULT_SETTINGS = {
         "low_threshold": 0.10,
     },
 }
+
+# Available ASR models
+ASR_MODELS = [
+    {"model_name": "Qwen3-ASR-1.7B", "model_id": "Qwen/Qwen3-ASR-1.7B"},
+    {"model_name": "Qwen3-ASR-0.6B", "model_id": "Qwen/Qwen3-ASR-0.6B"},
+]

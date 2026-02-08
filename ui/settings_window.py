@@ -223,6 +223,34 @@ class SettingsWindow(QDialog):
 
         main_layout.addWidget(mic_group)
 
+        # --- Speaker Verification Section ---
+        sv_group = IconGroupBox("声纹识别", "shield")
+        sv_layout = QVBoxLayout(sv_group)
+        sv_layout.setSpacing(10)
+
+        self._sv_toggle = ToggleSwitch(
+            "启用声纹验证",
+            checked=s.get("speaker_verification", "enabled", default=False),
+        )
+        sv_layout.addWidget(self._sv_toggle)
+
+        sv_hint = QLabel("注册声纹后，将自动过滤其他人的语音输入")
+        sv_hint.setObjectName("secondaryLabel")
+        sv_hint.setWordWrap(True)
+        sv_layout.addWidget(sv_hint)
+
+        sv_btn_row = QHBoxLayout()
+        self._sv_status_label = QLabel(self._get_enrollment_status())
+        self._sv_status_label.setObjectName("secondaryLabel")
+        sv_btn_row.addWidget(self._sv_status_label)
+        sv_btn_row.addStretch()
+        self._enroll_btn = QPushButton("录制声纹")
+        self._enroll_btn.clicked.connect(self._open_enrollment)
+        sv_btn_row.addWidget(self._enroll_btn)
+        sv_layout.addLayout(sv_btn_row)
+
+        main_layout.addWidget(sv_group)
+
         # --- Output Section ---
         out_group = IconGroupBox("输出设置", "gear")
         out_layout = QVBoxLayout(out_group)
@@ -292,6 +320,30 @@ class SettingsWindow(QDialog):
         btn_layout.addWidget(cancel_btn)
 
         main_layout.addLayout(btn_layout)
+
+    # --- Speaker verification ---
+
+    def _get_enrollment_status(self) -> str:
+        from config import SPEAKER_DIR
+        centroid_path = os.path.join(SPEAKER_DIR, "centroid.npy")
+        if os.path.isfile(centroid_path):
+            meta_path = os.path.join(SPEAKER_DIR, "metadata.json")
+            if os.path.isfile(meta_path):
+                try:
+                    import json
+                    with open(meta_path, encoding="utf-8") as f:
+                        meta = json.load(f)
+                    return f"已注册 ({meta.get('sample_count', '?')} 个样本)"
+                except Exception:
+                    pass
+            return "已注册"
+        return "未注册声纹"
+
+    def _open_enrollment(self) -> None:
+        from ui.enrollment_dialog import EnrollmentDialog
+        dialog = EnrollmentDialog(self._settings, parent=self)
+        if dialog.exec():
+            self._sv_status_label.setText(self._get_enrollment_status())
 
     # --- Device discovery ---
 
@@ -417,6 +469,8 @@ class SettingsWindow(QDialog):
             self._settings.set("output", "restore_clipboard", self._restore_toggle.isChecked())
 
             self._settings.set("vocabulary", "enabled", self._vocab_toggle.isChecked())
+
+            self._settings.set("speaker_verification", "enabled", self._sv_toggle.isChecked())
 
             self._settings.save()
             logger.info("Settings saved: mode=%s, hotkey=%s", mode, self._hotkey_keys)

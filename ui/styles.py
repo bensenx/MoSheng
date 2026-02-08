@@ -526,6 +526,19 @@ def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> Q
         path_r.quadTo(s * 0.9, s * 0.85, cx, s * 0.85)
         p.drawPath(path_r)
 
+    elif name == "shield":
+        cx = s / 2
+        path = QPainterPath()
+        path.moveTo(cx, s * 0.08)
+        path.lineTo(s * 0.88, s * 0.28)
+        path.quadTo(s * 0.88, s * 0.62, cx, s * 0.92)
+        path.quadTo(s * 0.12, s * 0.62, s * 0.12, s * 0.28)
+        path.closeSubpath()
+        p.drawPath(path)
+        # Checkmark inside shield
+        p.drawLine(QPointF(cx - s * 0.15, s * 0.50), QPointF(cx - s * 0.02, s * 0.63))
+        p.drawLine(QPointF(cx - s * 0.02, s * 0.63), QPointF(cx + s * 0.18, s * 0.38))
+
     p.end()
     return pixmap
 

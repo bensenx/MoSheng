@@ -81,3 +81,10 @@ class AudioRecorder:
     @property
     def sample_rate(self) -> int:
         return self._sample_rate
+
+    def recent_rms(self) -> float:
+        """Return RMS of the most recent audio chunk, or 0.0 if none available."""
+        with self._lock:
+            if self._buffer:
+                return float(np.sqrt(np.mean(self._buffer[-1] ** 2)))
+        return 0.0

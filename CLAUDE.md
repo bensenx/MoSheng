@@ -1,6 +1,6 @@
 # MoSheng (墨声)
 
-声音，化为笔墨。Windows 本地智能语音输入工具，基于 Qwen3-ASR-1.7B。支持**按住录音**和**按键切换**两种模式，松开/再按后自动识别并粘贴文本。暗色毛玻璃 Glassmorphism UI 风格。
+声音，化为笔墨。Windows 本地智能语音输入工具，基于 Qwen3-ASR-1.7B。支持**按住录音**和**按键切换**两种模式，松开/再按后自动识别并粘贴文本。支持**渐进式输入**（停顿时自动输入已识别文本）。暗色毛玻璃 Glassmorphism UI 风格。
 
 ## 运行
 
@@ -29,10 +29,11 @@ _setup.cmd              首次运行安装脚本（GPU 检测、镜像选择、u
 core/
   asr_base.py           ASR 抽象基类 (ABC)，可替换模型
   asr_qwen.py           Qwen3-ASR-1.7B 实现（含音频诊断日志）
-  audio_recorder.py     sounddevice 录音，16kHz 单声道 float32，支持指定设备
+  audio_recorder.py     sounddevice 录音，16kHz 单声道 float32，支持指定设备，drain_buffer + EMA RMS
   speaker_verifier.py   声纹识别：SpeechBrain ECAPA-TDNN 两级验证（快速路径/慢速分段）
-  text_injector.py      剪贴板写入 + ctypes SendInput 模拟 Ctrl+V
-  hotkey_manager.py     全局快捷键，支持 push_to_talk / toggle 两种模式
+  text_injector.py      剪贴板写入 + ctypes SendInput 模拟 Ctrl+V，hotkey-aware 修饰键释放
+  hotkey_manager.py     WH_KEYBOARD_LL 钩子级按键抑制 + VK 码分组匹配，支持 push_to_talk / toggle
+  key_suppression_hook.py  ctypes 低级键盘钩子，选择性抑制物理按键，放行 SendInput 注入事件
 ui/
   app.py                QSystemTrayIcon + WorkerThread 组件协调器（核心调度）
   splash_screen.py      启动加载界面（glassmorphism，模型加载期间显示）
@@ -55,7 +56,7 @@ scripts/
 
 | 分类 | 项目 | 运行时热更新 |
 |------|------|:---:|
-| 快捷键 | 按键组合、录音模式（按住/切换） | ✓ |
+| 快捷键 | 按键组合、录音模式（按住/切换）、渐进式输入、静音阈值/时长 | ✓ |
 | 语音识别 | ASR 模型、GPU 设备 | ✗ 需重启 |
 | 音频输入 | 麦克风设备选择 | ✓ |
 | 输出 | 提示音、悬浮窗、剪贴板恢复 | ✓ |
@@ -92,8 +93,8 @@ uv run python scripts/build_dist.py
 ## 线程模型
 
 - **主线程**: `QApplication.exec()` 事件循环，拥有所有 QWidget 和 QSystemTrayIcon
-- **keyboard 线程**: 快捷键 press/release 事件 → 写入 worker cmd_queue
-- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→声纹验证→识别→粘贴流程，通过 `state_changed` 信号更新 UI
+- **KeySuppressionHook 线程**: WH_KEYBOARD_LL 钩子 + 消息泵，VK 码分组匹配触发 start/stop → 写入 worker cmd_queue
+- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→声纹验证→识别→粘贴流程，通过 `state_changed` 信号更新 UI；渐进模式下 50ms 轮询 RMS 检测停顿
 - **PortAudio 回调线程**: 音频帧写入 buffer
 
 ## 编码注意事项
@@ -101,8 +102,20 @@ uv run python scripts/build_dist.py
 ### ctypes SendInput
 - INPUT 结构体 union 必须包含 MOUSEINPUT + KEYBDINPUT + HARDWAREINPUT 三个成员，否则 `sizeof(INPUT)` 为 24（应为 40），`SendInput` 会静默失败
 - `keyboard.send()` 底层用已废弃的 `keybd_event`，在 Win11 记事本和 cmd 中不可靠；用 ctypes `SendInput` 代替
-- 调用粘贴前必须 `_release_modifiers()` 用 `GetAsyncKeyState` 检测并释放残留修饰键
+- `_send_ctrl_v(hotkey_vks)` 接收快捷键 VK 集合，跳过被钩子抑制的按键（OS 不认为它们被按下），仅释放非快捷键修饰键
 - Cursor/VS Code 内嵌终端 (xterm.js) 对 SendInput Ctrl+V 不响应，属环境限制
+
+### WH_KEYBOARD_LL 钩子 (key_suppression_hook.py)
+- 钩子回调必须在有消息泵的线程上运行（`GetMessageW` 循环），否则收不到事件
+- `SetWindowsHookExW` 的 argtypes/restype 必须显式声明为 `c_void_p`，默认 `c_int` 在 64 位系统上截断句柄
+- 通过 `LLKHF_INJECTED` 标志区分物理按键和 SendInput 注入事件，注入事件始终放行
+- 回调返回 1 抑制事件（不调用 `CallNextHookEx`），返回 `CallNextHookEx(...)` 放行
+- 快捷键在钩子层面被吞掉 → OS 完全看不到 → 无 Win 键开始菜单、无截图、无剪贴板历史等副作用
+
+### 快捷键 VK 码分组匹配
+- 每个按键名映射为一组 VK 码：如 "ctrl" → `{0x11, 0xA2, 0xA3}`（通用 + 左 + 右）
+- 匹配条件：每个组中至少有一个 VK 被按下（`_all_groups_pressed()`），而非要求所有 VK 同时按下
+- VK 码表来自 `keyboard._winkeyboard.official_virtual_keys`，仅读取数据不使用其钩子
 
 ### PySide6 / Qt
 - `QApplication.setQuitOnLastWindowClosed(False)` — 托盘应用必须设置，否则关闭设置窗口会退出程序
@@ -115,9 +128,16 @@ uv run python scripts/build_dist.py
 - Splash 直接设 `setWindowOpacity(1.0)`，主线程阻塞时 fade-in 动画不运行
 
 ### keyboard 库
-- hook 回调跑在 keyboard 自己的线程上，修改共享状态需加锁
+- 快捷键监听已改用 WH_KEYBOARD_LL 钩子（`key_suppression_hook.py`），keyboard 库仅用于设置窗口的快捷键捕获 UI 和 VK 码表查询
 - Windows 按住键会连续触发 KEY_DOWN，push_to_talk 用 `_is_active` 防抖，toggle 用 `_toggle_fired` 防抖
 - KEY_UP 事件可能因窗口焦点切换丢失
+
+### 渐进式输入 (progressive input)
+- WorkerThread 在 `_handle_start()` 末尾进入 `_run_progressive_loop()`，50ms 轮询 cmd_queue + EMA 平滑 RMS
+- 语音→静音转换后等待 `silence_duration`（默认 0.8s），然后 `drain_buffer()` + `_flush_and_inject()`
+- 每个分段都经过声纹验证（如已启用）和词汇表上下文
+- 剪贴板在循环开始前 `save_clipboard()`，每段用 `inject_text_no_restore()`，循环结束后一次性 `restore_saved_clipboard()`
+- 最终 flush 失败时：若之前有成功注入则发 STATE_IDLE（清除 overlay），否则发 STATE_ERROR
 
 ### 音频录制
 - `sounddevice.InputStream(device=N)` 指定输入设备，`None` 为系统默认
@@ -141,7 +161,7 @@ uv run python scripts/build_dist.py
 - 注册：3 段音频 → 提取嵌入 → 交叉验证成对余弦相似度 → 计算质心 → 保存到 `~/.mosheng/speaker/`
 - 懒加载：默认禁用，运行时可通过设置开关加载/卸载模型（`_apply_settings` 中处理）
 - speechbrain 仅在 `load_model()` 方法内 import，禁用时零 import 开销
-- `QTimer.singleShot` 不可取消 — 注册录制的自动停止必须用可取消的 `QTimer` 实例
+- `QTimer.singleShot` 不可取消 — 注册录制的自动停止和 overlay 隐藏定时器必须用可取消的 `QTimer` 实例（overlay 的 `_hide_timer` 在 `set_state()` 时 `.stop()` 防止渐进模式下结果闪烁）
 
 ### 通用
 - 跨类访问用公开属性/方法，不直接读写 `_private` 成员

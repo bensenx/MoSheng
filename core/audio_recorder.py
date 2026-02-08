@@ -19,6 +19,9 @@ class AudioRecorder:
         self._stream: sd.InputStream | None = None
         self._lock = threading.Lock()
         self._recording = False
+        self._current_rms: float = 0.0
+        self._smoothed_rms: float = 0.0
+        self._rms_alpha: float = 0.3  # EMA smoothing factor (lower = smoother)
 
     @property
     def is_recording(self) -> bool:
@@ -62,6 +65,17 @@ class AudioRecorder:
         logger.info("Recording stopped: %.2fs, %d samples", duration, len(audio))
         return audio
 
+    def drain_buffer(self) -> np.ndarray | None:
+        """Return accumulated audio and clear the buffer without stopping the stream."""
+        with self._lock:
+            if not self._buffer:
+                return None
+            audio = np.concatenate(self._buffer, axis=0).flatten()
+            self._buffer.clear()
+        duration = len(audio) / self._sample_rate
+        logger.info("Buffer drained: %.2fs, %d samples", duration, len(audio))
+        return audio
+
     def _audio_callback(self, indata: np.ndarray, frames: int,
                         time_info, status) -> None:
         if status:
@@ -69,6 +83,9 @@ class AudioRecorder:
         with self._lock:
             if self._recording:
                 self._buffer.append(indata.copy())
+                self._current_rms = float(np.sqrt(np.mean(indata ** 2)))
+                self._smoothed_rms = (self._rms_alpha * self._current_rms
+                                      + (1 - self._rms_alpha) * self._smoothed_rms)
 
     @property
     def device(self) -> int | None:
@@ -82,9 +99,7 @@ class AudioRecorder:
     def sample_rate(self) -> int:
         return self._sample_rate
 
-    def recent_rms(self) -> float:
-        """Return RMS of the most recent audio chunk, or 0.0 if none available."""
+    @property
+    def current_rms(self) -> float:
         with self._lock:
-            if self._buffer:
-                return float(np.sqrt(np.mean(self._buffer[-1] ** 2)))
-        return 0.0
+            return self._smoothed_rms

@@ -40,6 +40,9 @@ DEFAULT_SETTINGS = {
     "hotkey": {
         "keys": ["ctrl", "left windows"],
         "display": "Ctrl + Win",
+        "progressive": False,
+        "silence_threshold": 0.05,
+        "silence_duration": 0.8,
     },
     "mode": "push_to_talk",
     "asr": {

@@ -6,6 +6,8 @@ import threading
 
 import os
 
+import numpy as np
+
 from PySide6.QtCore import QThread, Signal, Slot, Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
@@ -45,6 +47,9 @@ class WorkerThread(QThread):
         self._speaker_verifier = speaker_verifier
         self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._hotword_context: str = ""
+        self._progressive: bool = False
+        self._silence_threshold: float = 0.05
+        self._silence_duration: float = 0.8
 
     @property
     def speaker_verifier(self):
@@ -62,6 +67,30 @@ class WorkerThread(QThread):
     def hotword_context(self, value: str) -> None:
         self._hotword_context = value
 
+    @property
+    def progressive(self) -> bool:
+        return self._progressive
+
+    @progressive.setter
+    def progressive(self, value: bool) -> None:
+        self._progressive = value
+
+    @property
+    def silence_threshold(self) -> float:
+        return self._silence_threshold
+
+    @silence_threshold.setter
+    def silence_threshold(self, value: float) -> None:
+        self._silence_threshold = value
+
+    @property
+    def silence_duration(self) -> float:
+        return self._silence_duration
+
+    @silence_duration.setter
+    def silence_duration(self, value: float) -> None:
+        self._silence_duration = value
+
     def enqueue(self, cmd: str) -> None:
         self._cmd_queue.put(cmd)
 
@@ -76,6 +105,7 @@ class WorkerThread(QThread):
                 self._handle_stop()
 
     def _handle_start(self) -> None:
+        logger.info("Recording start (progressive=%s)", self._progressive)
         self._recorder.start_recording()
         self.state_changed.emit(STATE_RECORDING, "")
         if self._settings.get("output", "sound_enabled", default=True):
@@ -83,6 +113,70 @@ class WorkerThread(QThread):
             threading.Thread(
                 target=lambda: winsound.Beep(800, 100), daemon=True
             ).start()
+
+        if self._progressive:
+            self._run_progressive_loop()
+
+    def _run_progressive_loop(self) -> None:
+        """Monitor for speech pauses and transcribe incrementally."""
+        import time
+
+        if self._settings.get("output", "restore_clipboard", default=True):
+            self._injector.save_clipboard()
+
+        silence_start: float | None = None
+        had_speech = False
+        injected_any = False
+
+        while True:
+            try:
+                cmd = self._cmd_queue.get(timeout=0.05)
+                if cmd == CMD_STOP:
+                    break
+                elif cmd == CMD_QUIT:
+                    self._cmd_queue.put(CMD_QUIT)
+                    break
+            except queue.Empty:
+                pass
+
+            rms = self._recorder.current_rms
+            if rms < self._silence_threshold:
+                if had_speech and silence_start is None:
+                    silence_start = time.monotonic()
+                elif (had_speech and silence_start is not None
+                      and time.monotonic() - silence_start >= self._silence_duration):
+                    audio = self._recorder.drain_buffer()
+                    if self._flush_and_inject(audio, use_clipboard_restore=False):
+                        injected_any = True
+                    self.state_changed.emit(STATE_RECORDING, "")
+                    silence_start = None
+                    had_speech = False
+            else:
+                had_speech = True
+                silence_start = None
+
+        # Final flush
+        audio = self._recorder.stop_recording()
+        if self._settings.get("output", "sound_enabled", default=True):
+            import winsound
+            threading.Thread(
+                target=lambda: winsound.Beep(600, 100), daemon=True
+            ).start()
+
+        final_ok = False
+        min_dur = self._settings.get("audio", "min_duration", default=0.3)
+        if audio is not None and len(audio) / self._recorder.sample_rate >= min_dur:
+            final_ok = self._flush_and_inject(audio, use_clipboard_restore=False)
+            if final_ok:
+                injected_any = True
+
+        if self._settings.get("output", "restore_clipboard", default=True):
+            self._injector.restore_saved_clipboard()
+
+        if not injected_any:
+            self.state_changed.emit(STATE_ERROR, "未识别到内容")
+        elif not final_ok:
+            self.state_changed.emit(STATE_IDLE, "")
 
     def _handle_stop(self) -> None:
         audio = self._recorder.stop_recording()
@@ -92,10 +186,15 @@ class WorkerThread(QThread):
                 target=lambda: winsound.Beep(600, 100), daemon=True
             ).start()
 
+        if not self._flush_and_inject(audio):
+            self.state_changed.emit(STATE_ERROR, "录音太短")
+
+    def _flush_and_inject(self, audio: np.ndarray | None,
+                          use_clipboard_restore: bool = True) -> bool:
+        """Transcribe audio and inject text. Returns True if text was injected."""
         min_duration = self._settings.get("audio", "min_duration", default=0.3)
         if audio is None or len(audio) / self._recorder.sample_rate < min_duration:
-            self.state_changed.emit(STATE_ERROR, "录音太短")
-            return
+            return False
 
         # Speaker verification (if enabled and enrolled)
         if (self._speaker_verifier is not None
@@ -105,7 +204,7 @@ class WorkerThread(QThread):
                 if not result.is_user:
                     logger.info("Speaker filtered: path=%s, score=%.4f", result.path, result.score)
                     self.state_changed.emit(STATE_FILTERED, "")
-                    return
+                    return False
                 if result.audio is not None:
                     audio = result.audio
             except Exception:
@@ -117,13 +216,16 @@ class WorkerThread(QThread):
             text = self._asr.transcribe(audio, self._recorder.sample_rate,
                                           context=self._hotword_context)
             if text.strip():
-                self._injector.inject_text(text)
+                if use_clipboard_restore:
+                    self._injector.inject_text(text)
+                else:
+                    self._injector.inject_text_no_restore(text)
                 self.state_changed.emit(STATE_RESULT, text)
-            else:
-                self.state_changed.emit(STATE_ERROR, "未识别到内容")
+                return True
         except Exception:
             logger.exception("Transcription failed")
             self.state_changed.emit(STATE_ERROR, "识别失败")
+        return False
 
 
 class MoShengApp:
@@ -157,6 +259,9 @@ class MoShengApp:
         self._worker.state_changed.connect(self._on_state_changed,
                                             Qt.ConnectionType.QueuedConnection)
         self._worker.hotword_context = self._build_hotword_context()
+        self._worker.progressive = settings.get("hotkey", "progressive", default=False)
+        self._worker.silence_threshold = settings.get("hotkey", "silence_threshold", default=0.05)
+        self._worker.silence_duration = settings.get("hotkey", "silence_duration", default=0.8)
 
         # Hotkey manager
         hotkey_keys = settings.get("hotkey", "keys", default=["ctrl", "left windows"])
@@ -167,6 +272,9 @@ class MoShengApp:
             on_stop=lambda: self._worker.enqueue(CMD_STOP),
             mode=hotkey_mode,
         )
+
+        # Wire hotkey VK codes to the text injector
+        self._injector.hotkey_vks = self._hotkey.hotkey_vks
 
         # Application icon (loaded from assets if available)
         self._app_icon = self._load_app_icon()
@@ -247,6 +355,7 @@ class MoShengApp:
     def _apply_settings(self) -> None:
         new_keys = self._settings.get("hotkey", "keys", default=["ctrl", "left windows"])
         self._hotkey.update_hotkey(new_keys)
+        self._injector.hotkey_vks = self._hotkey.hotkey_vks
 
         new_mode = self._settings.get("mode", default="push_to_talk")
         self._hotkey.update_mode(new_mode)
@@ -259,6 +368,15 @@ class MoShengApp:
         )
         self._recorder.device = self._settings.get(
             "audio", "input_device", default=None
+        )
+        self._worker.progressive = self._settings.get(
+            "hotkey", "progressive", default=False
+        )
+        self._worker.silence_threshold = self._settings.get(
+            "hotkey", "silence_threshold", default=0.05
+        )
+        self._worker.silence_duration = self._settings.get(
+            "hotkey", "silence_duration", default=0.8
         )
         self._worker.hotword_context = self._build_hotword_context()
 

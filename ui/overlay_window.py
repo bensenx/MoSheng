@@ -47,6 +47,9 @@ class OverlayWindow(QWidget):
         self._anim_timer = QTimer(self)
         self._anim_timer.timeout.connect(self._animate_recording)
         self._anim_step = 0
+        self._hide_timer = QTimer(self)
+        self._hide_timer.setSingleShot(True)
+        self._hide_timer.timeout.connect(self.hide)
         self._opacity = 0.0
 
         # Window flags
@@ -182,6 +185,7 @@ class OverlayWindow(QWidget):
             return
 
         self._anim_timer.stop()
+        self._hide_timer.stop()
 
         if state == STATE_IDLE:
             self.hide()
@@ -203,18 +207,18 @@ class OverlayWindow(QWidget):
             self._label.setStyleSheet(f"color: {COLOR_RESULT}; background: transparent;")
             display = text if len(text) <= 30 else text[:28] + "..."
             self._label.setText(display)
-            QTimer.singleShot(self.RESULT_DISPLAY_MS, self.hide)
+            self._hide_timer.start(self.RESULT_DISPLAY_MS)
 
         elif state == STATE_ERROR:
             self._label.setStyleSheet(f"color: {COLOR_ERROR}; background: transparent;")
             display = text if len(text) <= 30 else text[:28] + "..."
             self._label.setText(display)
-            QTimer.singleShot(self.RESULT_DISPLAY_MS, self.hide)
+            self._hide_timer.start(self.RESULT_DISPLAY_MS)
 
         elif state == STATE_FILTERED:
             self._label.setStyleSheet(f"color: {COLOR_FILTERED}; background: transparent;")
             self._label.setText("已过滤")
-            QTimer.singleShot(1000, self.hide)
+            self._hide_timer.start(1000)
 
     # --- Animation ---
 

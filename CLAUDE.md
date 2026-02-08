@@ -30,12 +30,14 @@ core/
   asr_base.py           ASR 抽象基类 (ABC)，可替换模型
   asr_qwen.py           Qwen3-ASR-1.7B 实现（含音频诊断日志）
   audio_recorder.py     sounddevice 录音，16kHz 单声道 float32，支持指定设备
+  speaker_verifier.py   声纹识别：SpeechBrain ECAPA-TDNN 两级验证（快速路径/慢速分段）
   text_injector.py      剪贴板写入 + ctypes SendInput 模拟 Ctrl+V
   hotkey_manager.py     全局快捷键，支持 push_to_talk / toggle 两种模式
 ui/
   app.py                QSystemTrayIcon + WorkerThread 组件协调器（核心调度）
   splash_screen.py      启动加载界面（glassmorphism，模型加载期间显示）
-  overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果），click-through + fade animation
+  overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果/已过滤），click-through + fade animation
+  enrollment_dialog.py  声纹注册引导对话框（3 段录音 + 背景线程处理）
   settings_window.py    QDialog 设置界面（Glassmorphism + DWM Acrylic backdrop）
   styles.py             Glassmorphism QSS + 颜色常量 + ToggleSwitch + load_icon_pixmap + draw_section_icon
 utils/
@@ -58,6 +60,7 @@ scripts/
 | 音频输入 | 麦克风设备选择 | ✓ |
 | 输出 | 提示音、悬浮窗、剪贴板恢复 | ✓ |
 | 词汇 | 自定义词汇表、CSV/TXT 导入 | ✓ |
+| 声纹识别 | 启用/禁用、注册声纹、阈值配置 | ✓ 懒加载/卸载 |
 
 ## 分发包
 
@@ -90,7 +93,7 @@ uv run python scripts/build_dist.py
 
 - **主线程**: `QApplication.exec()` 事件循环，拥有所有 QWidget 和 QSystemTrayIcon
 - **keyboard 线程**: 快捷键 press/release 事件 → 写入 worker cmd_queue
-- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→识别→粘贴流程，通过 `state_changed` 信号更新 UI
+- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→声纹验证→识别→粘贴流程，通过 `state_changed` 信号更新 UI
 - **PortAudio 回调线程**: 音频帧写入 buffer
 
 ## 编码注意事项
@@ -129,6 +132,16 @@ uv run python scripts/build_dist.py
 - 单实例保护：`CreateMutexW("MoSheng_SingleInstance")` + `GetLastError() == 183`
 - QApplication 在模型加载**之前**创建，以便显示 splash screen
 - 模型加载在主线程阻塞，splash 保持可见但动画暂停（已足够提供视觉反馈）
+
+### 声纹识别 (speaker_verifier.py)
+- 模型：SpeechBrain ECAPA-TDNN (`speechbrain/spkrec-ecapa-voxceleb`)，192 维嵌入
+- torchaudio 2.10+ 移除了 `list_audio_backends()`，需在 import speechbrain 前加 shim
+- 两级验证：快速路径（整段音频嵌入 vs 质心，<50ms）→ 慢速路径（2s 窗口逐段分析）
+- 阈值：high=0.40 直接通过，low=0.10 直接拒绝，中间进入慢速路径
+- 注册：3 段音频 → 提取嵌入 → 交叉验证成对余弦相似度 → 计算质心 → 保存到 `~/.mosheng/speaker/`
+- 懒加载：默认禁用，运行时可通过设置开关加载/卸载模型（`_apply_settings` 中处理）
+- speechbrain 仅在 `load_model()` 方法内 import，禁用时零 import 开销
+- `QTimer.singleShot` 不可取消 — 注册录制的自动停止必须用可取消的 `QTimer` 实例
 
 ### 通用
 - 跨类访问用公开属性/方法，不直接读写 `_private` 成员

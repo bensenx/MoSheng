@@ -35,12 +35,14 @@ class WorkerThread(QThread):
     state_changed = Signal(str, str)  # (state, text)
 
     def __init__(self, recorder: AudioRecorder, asr: ASRBase,
-                 injector: TextInjector, settings: SettingsManager):
+                 injector: TextInjector, settings: SettingsManager,
+                 speaker_verifier=None):
         super().__init__()
         self._recorder = recorder
         self._asr = asr
         self._injector = injector
         self._settings = settings
+        self._speaker_verifier = speaker_verifier
         self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._hotword_context: str = ""
 
@@ -87,6 +89,20 @@ class WorkerThread(QThread):
             self.state_changed.emit(STATE_ERROR, "录音太短")
             return
 
+        # Speaker verification (if enabled and enrolled)
+        if (self._speaker_verifier is not None
+                and self._settings.get("speaker_verification", "enabled", default=False)):
+            try:
+                result = self._speaker_verifier.verify(audio, self._recorder.sample_rate)
+                if not result.is_user:
+                    logger.info("Speaker filtered: path=%s, score=%.4f", result.path, result.score)
+                    self.state_changed.emit(STATE_FILTERED, "")
+                    return
+                if result.audio is not None:
+                    audio = result.audio
+            except Exception:
+                logger.exception("Speaker verification failed, proceeding with ASR")
+
         self.state_changed.emit(STATE_RECOGNIZING, "")
 
         try:
@@ -105,8 +121,10 @@ class WorkerThread(QThread):
 class MoShengApp:
     """Main application: tray icon, overlay, worker thread, hotkey manager."""
 
-    def __init__(self, asr_engine: ASRBase, settings: SettingsManager):
+    def __init__(self, asr_engine: ASRBase, settings: SettingsManager,
+                 speaker_verifier=None):
         self._settings = settings
+        self._speaker_verifier = speaker_verifier
 
         # Audio recorder
         sr = settings.get("audio", "sample_rate", default=16000)
@@ -125,7 +143,8 @@ class MoShengApp:
 
         # Worker thread
         self._worker = WorkerThread(
-            self._recorder, asr_engine, self._injector, settings
+            self._recorder, asr_engine, self._injector, settings,
+            speaker_verifier=speaker_verifier,
         )
         self._worker.state_changed.connect(self._on_state_changed,
                                             Qt.ConnectionType.QueuedConnection)
@@ -234,6 +253,12 @@ class MoShengApp:
             "audio", "input_device", default=None
         )
         self._worker.hotword_context = self._build_hotword_context()
+        if self._speaker_verifier is not None:
+            self._speaker_verifier.update_thresholds(
+                self._settings.get("speaker_verification", "threshold", default=0.25),
+                self._settings.get("speaker_verification", "high_threshold", default=0.40),
+                self._settings.get("speaker_verification", "low_threshold", default=0.10),
+            )
         logger.info("Settings applied")
 
     def _build_hotword_context(self) -> str:

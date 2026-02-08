@@ -66,6 +66,32 @@ def load_asr_engine(settings: SettingsManager):
     return engine
 
 
+def load_speaker_verifier(settings: SettingsManager):
+    """Load speaker verification model if enabled."""
+    from config import SPEAKER_DIR
+
+    enabled = settings.get("speaker_verification", "enabled", default=False)
+    if not enabled:
+        print("声纹识别未启用，跳过模型加载。")
+        return None
+
+    from core.speaker_verifier import SpeakerVerifier
+
+    device = settings.get("asr", "device", default="cuda:0")
+    verifier = SpeakerVerifier(device=device)
+
+    threshold = settings.get("speaker_verification", "threshold", default=0.25)
+    high = settings.get("speaker_verification", "high_threshold", default=0.40)
+    low = settings.get("speaker_verification", "low_threshold", default=0.10)
+    verifier.update_thresholds(threshold, high, low)
+
+    print("正在加载声纹识别模型...")
+    verifier.load_model()
+    verifier.load_enrollment(SPEAKER_DIR)
+    print("声纹识别模型加载完成！")
+    return verifier
+
+
 def main():
     setup_logging()
     logger = logging.getLogger(__name__)
@@ -77,6 +103,10 @@ def main():
     settings = SettingsManager()
     asr_engine = load_asr_engine(settings)
     atexit.register(asr_engine.unload_model)
+
+    speaker_verifier = load_speaker_verifier(settings)
+    if speaker_verifier:
+        atexit.register(speaker_verifier.unload_model)
 
     import os
     from PySide6.QtGui import QIcon
@@ -96,7 +126,8 @@ def main():
             qt_app.setWindowIcon(QIcon(icon_path))
             break
 
-    app = MoShengApp(asr_engine=asr_engine, settings=settings)
+    app = MoShengApp(asr_engine=asr_engine, settings=settings,
+                     speaker_verifier=speaker_verifier)
     app.start()
 
     hotkey_display = settings.get("hotkey", "display", default="Ctrl + Win")

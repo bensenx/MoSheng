@@ -40,6 +40,9 @@ class EnrollmentDialog(QDialog):
         self._is_recording = False
         self._level_timer = QTimer(self)
         self._level_timer.timeout.connect(self._update_level)
+        self._auto_stop_timer = QTimer(self)
+        self._auto_stop_timer.setSingleShot(True)
+        self._auto_stop_timer.timeout.connect(self._auto_stop)
 
         self._recording_done.connect(self._on_recording_done, Qt.ConnectionType.QueuedConnection)
 
@@ -143,8 +146,8 @@ class EnrollmentDialog(QDialog):
         self._status_label.setText("正在录制...")
         self._level_timer.start(50)
 
-        # Auto-stop after MAX_DURATION_SEC
-        QTimer.singleShot(int(MAX_DURATION_SEC * 1000), self._auto_stop)
+        # Auto-stop after MAX_DURATION_SEC (cancellable on manual stop)
+        self._auto_stop_timer.start(int(MAX_DURATION_SEC * 1000))
 
     def _auto_stop(self) -> None:
         if self._is_recording:
@@ -154,6 +157,7 @@ class EnrollmentDialog(QDialog):
         if not self._is_recording:
             return
         self._is_recording = False
+        self._auto_stop_timer.stop()
         self._level_timer.stop()
         self._level_bar.setValue(0)
 

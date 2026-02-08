@@ -19,6 +19,7 @@ SRC_FILES = [
     "main.py",
     "config.py",
     "settings_manager.py",
+    "i18n.py",
     "_setup.cmd",
 ]
 

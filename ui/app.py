@@ -13,6 +13,7 @@ from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from config import ASSETS_DIR
+from i18n import tr
 
 from settings_manager import SettingsManager
 from core.asr_base import ASRBase
@@ -173,7 +174,7 @@ class WorkerThread(QThread):
             self._injector.restore_saved_clipboard()
 
         if not injected_any:
-            self.state_changed.emit(STATE_ERROR, "未识别到内容")
+            self.state_changed.emit(STATE_ERROR, tr("worker.no_content"))
         elif not final_ok:
             self.state_changed.emit(STATE_IDLE, "")
 
@@ -186,7 +187,7 @@ class WorkerThread(QThread):
             ).start()
 
         if not self._flush_and_inject(audio):
-            self.state_changed.emit(STATE_ERROR, "录音太短")
+            self.state_changed.emit(STATE_ERROR, tr("worker.too_short"))
 
     def _flush_and_inject(self, audio: np.ndarray | None,
                           use_clipboard_restore: bool = True) -> bool:
@@ -223,7 +224,7 @@ class WorkerThread(QThread):
                 return True
         except Exception:
             logger.exception("Transcription failed")
-            self.state_changed.emit(STATE_ERROR, "识别失败")
+            self.state_changed.emit(STATE_ERROR, tr("worker.recognition_failed"))
         return False
 
 
@@ -288,14 +289,14 @@ class MoShengApp:
         self._tray = QSystemTrayIcon()
         if self._app_icon:
             self._tray.setIcon(self._app_icon)
-        self._tray.setToolTip("MoSheng - 就绪")
+        self._tray.setToolTip(tr("tray.ready"))
 
         menu = QMenu()
-        settings_action = QAction("设置", menu)
+        settings_action = QAction(tr("tray.settings"), menu)
         settings_action.triggered.connect(self._open_settings)
         menu.addAction(settings_action)
         menu.addSeparator()
-        quit_action = QAction("退出", menu)
+        quit_action = QAction(tr("tray.quit"), menu)
         quit_action.triggered.connect(self._quit)
         menu.addAction(quit_action)
         self._tray.setContextMenu(menu)
@@ -331,11 +332,11 @@ class MoShengApp:
         self._overlay.set_state(state, text)
 
         if state == STATE_RECORDING:
-            self._tray.setToolTip("MoSheng - 录音中")
+            self._tray.setToolTip(tr("tray.recording"))
         elif state == STATE_RECOGNIZING:
-            self._tray.setToolTip("MoSheng - 识别中")
+            self._tray.setToolTip(tr("tray.recognizing"))
         else:
-            self._tray.setToolTip("MoSheng - 就绪")
+            self._tray.setToolTip(tr("tray.ready"))
 
     # ---- Icons ----
 

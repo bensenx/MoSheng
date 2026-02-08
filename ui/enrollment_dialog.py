@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from config import SPEAKER_DIR
+from i18n import tr
 from settings_manager import SettingsManager
 from ui.styles import COLOR_ACCENT, COLOR_RESULT, COLOR_TEXT_SECONDARY, apply_acrylic_effect
 
@@ -19,11 +20,12 @@ logger = logging.getLogger(__name__)
 SAMPLE_COUNT = 3
 MIN_DURATION_SEC = 3.0
 MAX_DURATION_SEC = 8.0
-PROMPTS = [
-    "请自然地说一段话，例如：今天天气真不错，适合出去散步。",
-    "请继续说一段话，例如：我正在使用墨声语音输入工具。",
-    "最后一段，例如：声音化为笔墨，记录每一个想法。",
-]
+def _get_prompts() -> list[str]:
+    return [
+        tr("enrollment.prompt_1"),
+        tr("enrollment.prompt_2"),
+        tr("enrollment.prompt_3"),
+    ]
 
 
 class EnrollmentDialog(QDialog):
@@ -46,7 +48,7 @@ class EnrollmentDialog(QDialog):
 
         self._recording_done.connect(self._on_recording_done, Qt.ConnectionType.QueuedConnection)
 
-        self.setWindowTitle("声纹注册")
+        self.setWindowTitle(tr("enrollment.title"))
         self.setMinimumWidth(420)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
@@ -68,11 +70,11 @@ class EnrollmentDialog(QDialog):
         layout.setSpacing(12)
         layout.setContentsMargins(24, 24, 24, 24)
 
-        title = QLabel("声纹注册")
+        title = QLabel(tr("enrollment.title"))
         title.setStyleSheet(f"font-size: 18px; font-weight: 700; color: {COLOR_ACCENT}; background: transparent;")
         layout.addWidget(title)
 
-        self._instruction = QLabel("请在安静环境下录制 3 段语音样本")
+        self._instruction = QLabel(tr("enrollment.instruction"))
         self._instruction.setObjectName("secondaryLabel")
         self._instruction.setWordWrap(True)
         layout.addWidget(self._instruction)
@@ -83,7 +85,7 @@ class EnrollmentDialog(QDialog):
         self._progress_row = QHBoxLayout()
         self._step_labels: list[QLabel] = []
         for i in range(SAMPLE_COUNT):
-            lbl = QLabel(f"样本 {i + 1}")
+            lbl = QLabel(tr("enrollment.sample_n", n=i + 1))
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; background: transparent; font-size: 12px;")
             lbl.setFixedWidth(80)
@@ -92,7 +94,8 @@ class EnrollmentDialog(QDialog):
         layout.addLayout(self._progress_row)
 
         # Prompt text
-        self._prompt_label = QLabel(PROMPTS[0])
+        self._prompts = _get_prompts()
+        self._prompt_label = QLabel(self._prompts[0])
         self._prompt_label.setWordWrap(True)
         self._prompt_label.setStyleSheet("background: transparent; font-size: 13px; padding: 8px;")
         layout.addWidget(self._prompt_label)
@@ -108,12 +111,12 @@ class EnrollmentDialog(QDialog):
         # Record button
         btn_row = QHBoxLayout()
         btn_row.addStretch()
-        self._record_btn = QPushButton("开始录制")
+        self._record_btn = QPushButton(tr("enrollment.start_recording"))
         self._record_btn.setObjectName("primaryButton")
         self._record_btn.clicked.connect(self._toggle_recording)
         btn_row.addWidget(self._record_btn)
 
-        self._cancel_btn = QPushButton("取消")
+        self._cancel_btn = QPushButton(tr("settings.cancel"))
         self._cancel_btn.clicked.connect(self.reject)
         btn_row.addWidget(self._cancel_btn)
         btn_row.addStretch()
@@ -139,11 +142,11 @@ class EnrollmentDialog(QDialog):
         self._recorder.start_recording()
         self._is_recording = True
 
-        self._record_btn.setText("停止录制")
+        self._record_btn.setText(tr("enrollment.stop_recording"))
         self._record_btn.setObjectName("dangerButton")
         self._record_btn.style().unpolish(self._record_btn)
         self._record_btn.style().polish(self._record_btn)
-        self._status_label.setText("正在录制...")
+        self._status_label.setText(tr("enrollment.recording"))
         self._level_timer.start(50)
 
         # Auto-stop after MAX_DURATION_SEC (cancellable on manual stop)
@@ -164,13 +167,13 @@ class EnrollmentDialog(QDialog):
         audio = self._recorder.stop_recording()
         self._recorder = None
 
-        self._record_btn.setText("开始录制")
+        self._record_btn.setText(tr("enrollment.start_recording"))
         self._record_btn.setObjectName("primaryButton")
         self._record_btn.style().unpolish(self._record_btn)
         self._record_btn.style().polish(self._record_btn)
 
         if audio is None or len(audio) / 16000 < MIN_DURATION_SEC:
-            self._status_label.setText(f"录音太短（至少 {MIN_DURATION_SEC:.0f} 秒），请重试")
+            self._status_label.setText(tr("enrollment.too_short", seconds=f"{MIN_DURATION_SEC:.0f}"))
             return
 
         self._recording_done.emit(audio)
@@ -184,11 +187,11 @@ class EnrollmentDialog(QDialog):
         self._current_sample += 1
 
         if self._current_sample < SAMPLE_COUNT:
-            self._prompt_label.setText(PROMPTS[self._current_sample])
-            self._status_label.setText(f"样本 {self._current_sample} 录制完成")
+            self._prompt_label.setText(self._prompts[self._current_sample])
+            self._status_label.setText(tr("enrollment.sample_done", n=self._current_sample))
         else:
             self._record_btn.setEnabled(False)
-            self._status_label.setText("正在处理声纹...")
+            self._status_label.setText(tr("enrollment.processing"))
             QTimer.singleShot(100, self._process_enrollment)
 
     def _process_enrollment(self) -> None:
@@ -223,7 +226,7 @@ class EnrollmentDialog(QDialog):
                     self, "_on_enrollment_result",
                     Qt.ConnectionType.QueuedConnection,
                     Q_ARG(bool, False),
-                    Q_ARG(str, f"注册失败: {e}"),
+                    Q_ARG(str, tr("enrollment.failed", error=e)),
                 )
 
         threading.Thread(target=_do_enroll, daemon=True).start()
@@ -240,7 +243,7 @@ class EnrollmentDialog(QDialog):
             self._samples.clear()
             self._current_sample = 0
             self._record_btn.setEnabled(True)
-            self._prompt_label.setText(PROMPTS[0])
+            self._prompt_label.setText(self._prompts[0])
             for lbl in self._step_labels:
                 lbl.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; background: transparent; font-size: 12px;")
 

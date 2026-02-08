@@ -9,6 +9,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import QColor, QFont, QPainter, QPen
 from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
+from i18n import tr
 from ui.styles import (
     COLOR_BORDER, COLOR_ERROR, COLOR_FILTERED, COLOR_OVERLAY_BG, COLOR_OVERLAY_TEXT,
     COLOR_RECORDING, COLOR_RECOGNIZING, COLOR_RESULT, FONT_FAMILY,
@@ -211,7 +212,7 @@ class OverlayWindow(QWidget):
 
         elif state == STATE_RECOGNIZING:
             self._label.setStyleSheet(f"color: {COLOR_RECOGNIZING}; background: transparent;")
-            self._label.setText("识别中...")
+            self._label.setText(tr("overlay.recognizing"))
 
         elif state == STATE_RESULT:
             self._label.setStyleSheet(f"color: {COLOR_RESULT}; background: transparent;")
@@ -227,12 +228,12 @@ class OverlayWindow(QWidget):
 
         elif state == STATE_FILTERED:
             self._label.setStyleSheet(f"color: {COLOR_FILTERED}; background: transparent;")
-            self._label.setText("已过滤")
+            self._label.setText(tr("overlay.filtered"))
             self._hide_timer.start(1000)
 
     # --- Animation ---
 
     def _animate_recording(self) -> None:
         dots = "\u25cf" * ((self._anim_step % 3) + 1)
-        self._label.setText(f"录音中 {dots}")
+        self._label.setText(f"{tr('overlay.recording')} {dots}")
         self._anim_step += 1

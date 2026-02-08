@@ -155,6 +155,39 @@ def main():
     if not check_environment():
         sys.exit(1)
 
+    # Download ASR model if not cached
+    from core.model_downloader import is_model_cached, ModelDownloadThread
+
+    model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
+    if not is_model_cached(model_id):
+        model_name = settings.get("asr", "model_name", default="Qwen3-ASR-1.7B")
+        splash.set_status(tr("splash.downloading_model", name=model_name))
+        qt_app.processEvents()
+
+        download_thread = ModelDownloadThread(model_id)
+        download_error = []
+
+        def _on_download_progress(pct):
+            splash.set_status(tr("splash.download_progress", percent=pct))
+
+        def _on_download_error(msg):
+            download_error.append(msg)
+
+        download_thread.progress.connect(_on_download_progress)
+        download_thread.error.connect(_on_download_error)
+        download_thread.start()
+
+        while download_thread.isRunning():
+            qt_app.processEvents()
+            download_thread.wait(100)
+
+        if download_error:
+            _fatal_msgbox(
+                tr("error.model_download_failed", error=download_error[0]),
+                tr("error.title"),
+            )
+            sys.exit(1)
+
     # Load ASR model (main thread blocks, but splash is visible)
     splash.set_status("Loading ASR model...")
     qt_app.processEvents()

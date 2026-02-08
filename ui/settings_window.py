@@ -7,7 +7,7 @@ import os
 
 import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
-from PySide6.QtGui import QIcon, QPixmap
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QGroupBox,
     QHBoxLayout, QLabel, QLineEdit, QPushButton,
@@ -18,7 +18,7 @@ from config import ASSETS_DIR, VOCABULARY_FILE
 from settings_manager import SettingsManager
 from ui.styles import (
     COLOR_ACCENT, COLOR_TEXT_SECONDARY, IconGroupBox, ToggleSwitch,
-    apply_acrylic_effect,
+    apply_acrylic_effect, load_icon_pixmap,
 )
 
 logger = logging.getLogger(__name__)
@@ -88,20 +88,8 @@ class SettingsWindow(QDialog):
 
         icon_label = QLabel()
         logo_size = 44
-        # Prefer PNG (high-res source) over ICO for crisp scaling
-        icon_path = None
-        for ext in ("png", "ico"):
-            p = os.path.join(ASSETS_DIR, f"icon.{ext}")
-            if os.path.isfile(p):
-                icon_path = p
-                break
-        if icon_path:
-            pm = QPixmap(icon_path).scaled(
-                logo_size * 2, logo_size * 2,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            pm.setDevicePixelRatio(2)
+        pm = load_icon_pixmap(logo_size)
+        if pm:
             icon_label.setPixmap(pm)
         icon_label.setFixedSize(logo_size, logo_size)
         header.addWidget(icon_label)

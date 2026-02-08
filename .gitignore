@@ -30,4 +30,10 @@ nul
 .worktrees/
 
 # PyInstaller
+*.spec
 *.spec.bak
+
+# Build artifacts
+dist/
+build/
+mirror.env

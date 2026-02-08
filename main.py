@@ -1,6 +1,7 @@
 """MoSheng (墨声) - Local voice input tool powered by Qwen3-ASR."""
 
 import atexit
+import ctypes
 import sys
 import os
 import logging
@@ -12,6 +13,23 @@ from utils.logger import setup_logging
 from config import APP_NAME, APP_VERSION
 from settings_manager import SettingsManager
 
+# Windows API constants
+_ERROR_ALREADY_EXISTS = 183
+
+
+def _fatal_msgbox(msg: str) -> None:
+    """Show a native Windows error dialog (works without console or Qt)."""
+    ctypes.windll.user32.MessageBoxW(0, msg, "MoSheng - 错误", 0x10)
+
+
+def _acquire_single_instance() -> int:
+    """Try to acquire a named mutex. Returns handle if acquired, 0 if already running."""
+    mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "MoSheng_SingleInstance")
+    if ctypes.windll.kernel32.GetLastError() == _ERROR_ALREADY_EXISTS:
+        ctypes.windll.kernel32.CloseHandle(mutex)
+        return 0
+    return mutex
+
 
 def check_environment() -> bool:
     """Check GPU and audio device availability."""
@@ -21,33 +39,32 @@ def check_environment() -> bool:
     try:
         import torch
         if not torch.cuda.is_available():
-            logger.error("CUDA is not available. GPU required for ASR inference.")
-            print("错误: 未检测到 CUDA，请确保已安装 NVIDIA GPU 驱动和 CUDA。")
-            return False
-        gpu_name = torch.cuda.get_device_name(0)
-        vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        logger.info("GPU: %s (%.1f GB)", gpu_name, vram)
+            logger.warning("CUDA is not available, falling back to CPU.")
+        else:
+            gpu_name = torch.cuda.get_device_name(0)
+            vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            logger.info("GPU: %s (%.1f GB)", gpu_name, vram)
     except Exception as e:
-        logger.error("Failed to check CUDA: %s", e)
-        print(f"错误: CUDA 检测失败 - {e}")
+        logger.error("Failed to import torch: %s", e)
+        _fatal_msgbox(f"PyTorch 加载失败: {e}")
         return False
 
     # Check audio device
     try:
         import sounddevice as sd
-        devices = sd.query_devices()
         default_in = sd.query_devices(kind="input")
         logger.info("Audio input: %s", default_in["name"])
     except Exception as e:
         logger.error("No audio input device: %s", e)
-        print(f"错误: 未检测到麦克风 - {e}")
+        _fatal_msgbox(f"未检测到麦克风: {e}")
         return False
 
     return True
 
 
 def load_asr_engine(settings: SettingsManager):
-    """Load ASR model with progress display."""
+    """Load ASR model."""
+    logger = logging.getLogger(__name__)
     from core.asr_qwen import QwenASREngine
 
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
@@ -60,48 +77,66 @@ def load_asr_engine(settings: SettingsManager):
         dtype=dtype, max_new_tokens=max_tokens,
     )
 
-    print(f"正在加载 ASR 模型 ({model_id})，首次运行需下载模型权重...")
+    logger.info("Loading ASR model: %s ...", model_id)
     engine.load_model()
-    print("模型加载完成！")
+    logger.info("ASR model loaded.")
     return engine
 
 
 def main():
+    # Single instance check (before anything else)
+    mutex = _acquire_single_instance()
+    if not mutex:
+        _fatal_msgbox("MoSheng is already running.\n\nMoSheng 已在运行中。")
+        return
+
     setup_logging()
     logger = logging.getLogger(__name__)
     logger.info("%s v%s starting", APP_NAME, APP_VERSION)
 
-    if not check_environment():
-        sys.exit(1)
-
-    settings = SettingsManager()
-    asr_engine = load_asr_engine(settings)
-    atexit.register(asr_engine.unload_model)
-
-    import os
+    # Create QApplication early so we can show splash during model loading
     from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
     from ui.styles import FLUENT_DARK_STYLESHEET
-    from ui.app import MoShengApp
     from config import ASSETS_DIR
 
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)
     qt_app.setStyleSheet(FLUENT_DARK_STYLESHEET)
 
-    # Set application icon (window title bars, taskbar)
     for ext in ("ico", "png"):
         icon_path = os.path.join(ASSETS_DIR, f"icon.{ext}")
         if os.path.isfile(icon_path):
             qt_app.setWindowIcon(QIcon(icon_path))
             break
 
+    # Show splash screen
+    from ui.splash_screen import SplashScreen
+    splash = SplashScreen()
+    splash.show()
+    qt_app.processEvents()
+
+    # Environment check
+    splash.set_status("Checking environment...")
+    qt_app.processEvents()
+    if not check_environment():
+        sys.exit(1)
+
+    # Load ASR model (main thread blocks, but splash is visible)
+    splash.set_status("Loading ASR model...")
+    qt_app.processEvents()
+    settings = SettingsManager()
+    asr_engine = load_asr_engine(settings)
+    atexit.register(asr_engine.unload_model)
+
+    # Start the app, close splash
+    from ui.app import MoShengApp
     app = MoShengApp(asr_engine=asr_engine, settings=settings)
     app.start()
+    splash.finish()
 
-    hotkey_display = settings.get("hotkey", "display", default="Ctrl + Win")
-    print(f"\nMoSheng 已启动！按住 [{hotkey_display}] 开始录音，松开自动识别。")
-    print("右键系统托盘图标可打开设置或退出。\n")
+    logger.info("MoSheng ready. Hotkey: %s",
+                settings.get("hotkey", "display", default="Ctrl + Win"))
 
     try:
         sys.exit(qt_app.exec())
@@ -109,8 +144,13 @@ def main():
         logger.info("Interrupted by user")
     except Exception:
         logger.exception("Unhandled exception")
+        _fatal_msgbox("程序发生未处理的异常，请查看日志文件。")
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        _fatal_msgbox(f"启动失败: {e}")
+        sys.exit(1)

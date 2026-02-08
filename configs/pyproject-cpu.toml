@@ -20,21 +20,10 @@ override-dependencies = [
     "librosa>=0.10",
 ]
 
-[[tool.uv.index]]
-name = "pytorch-cu128"
-url = "https://download.pytorch.org/whl/cu128"
-explicit = true
-
-[tool.uv.sources]
-torch = { index = "pytorch-cu128" }
+# No pytorch-cu128 index — torch installed from PyPI (CPU version)
 
 [tool.hatch.build.targets.wheel]
 packages = ["core", "ui", "utils"]
-
-[dependency-groups]
-dev = [
-    "pyinstaller>=6.0",
-]
 
 [build-system]
 requires = ["hatchling"]

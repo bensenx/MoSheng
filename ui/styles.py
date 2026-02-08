@@ -443,29 +443,38 @@ class ToggleSwitch(QWidget):
 # App icon loader (high-DPI)
 # ---------------------------------------------------------------------------
 
-_ICON_SCALE = 4  # Render at 4x logical size — crisp on any DPI (1x–4x)
+def _screen_dpr() -> float:
+    """Return the primary screen's device-pixel-ratio (at least 2 for clarity)."""
+    from PySide6.QtWidgets import QApplication
+    app = QApplication.instance()
+    if app is not None:
+        screen = app.primaryScreen()
+        if screen is not None:
+            return max(screen.devicePixelRatio(), 2.0)
+    return 2.0
 
 
 def load_icon_pixmap(logical_size: int) -> QPixmap | None:
     """Load the app icon as a high-DPI QPixmap at *logical_size* px.
 
-    The icon is rendered at 4x physical resolution and tagged with the
-    matching devicePixelRatio so Qt displays it at the correct logical size.
+    The icon is rendered at the screen's device-pixel-ratio and tagged so
+    Qt displays it at the correct logical size.
     Prefers PNG (2048x2048 source) over ICO for best quality.
     """
     import os
     from config import ASSETS_DIR
 
+    dpr = _screen_dpr()
     for ext in ("png", "ico"):
         path = os.path.join(ASSETS_DIR, f"icon.{ext}")
         if os.path.isfile(path):
-            physical = logical_size * _ICON_SCALE
+            physical = round(logical_size * dpr)
             pm = QPixmap(path).scaled(
                 physical, physical,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
-            pm.setDevicePixelRatio(_ICON_SCALE)
+            pm.setDevicePixelRatio(dpr)
             return pm
     return None
 
@@ -475,21 +484,22 @@ def load_icon_pixmap(logical_size: int) -> QPixmap | None:
 # ---------------------------------------------------------------------------
 
 def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> QPixmap:
-    """Draw a line-art icon at high resolution for crisp high-DPI display."""
-    ps = size * _ICON_SCALE
+    """Draw a line-art icon matching screen DPR for pixel-perfect display."""
+    dpr = _screen_dpr()
+    ps = round(size * dpr)
     pixmap = QPixmap(ps, ps)
-    pixmap.setDevicePixelRatio(_ICON_SCALE)
+    pixmap.setDevicePixelRatio(dpr)
     pixmap.fill(QColor(0, 0, 0, 0))
     p = QPainter(pixmap)
     p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-    pen = QPen(QColor(color), 1.6)
+    pen = QPen(QColor(color), 1.8)
     pen.setCapStyle(Qt.PenCapStyle.RoundCap)
     pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
 
-    s = float(size)  # logical size for drawing coordinates
+    s = float(size)  # logical size for drawing coordinates (QPainter auto-scales)
 
     if name == "keyboard":
         p.drawRoundedRect(QRectF(1, 3, s - 2, s - 6), 2.5, 2.5)
@@ -591,6 +601,7 @@ class IconGroupBox(QGroupBox):
         # Draw icon in the title area
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
         # Position: left-aligned in the title margin area
         x = 12
         y = -1  # align with title baseline

@@ -17,9 +17,9 @@ from settings_manager import SettingsManager
 _ERROR_ALREADY_EXISTS = 183
 
 
-def _fatal_msgbox(msg: str) -> None:
+def _fatal_msgbox(msg: str, title: str = "MoSheng - Error") -> None:
     """Show a native Windows error dialog (works without console or Qt)."""
-    ctypes.windll.user32.MessageBoxW(0, msg, "MoSheng - 错误", 0x10)
+    ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)
 
 
 def _acquire_single_instance() -> int:
@@ -46,7 +46,8 @@ def check_environment() -> bool:
             logger.info("GPU: %s (%.1f GB)", gpu_name, vram)
     except Exception as e:
         logger.error("Failed to import torch: %s", e)
-        _fatal_msgbox(f"PyTorch 加载失败: {e}")
+        from i18n import tr
+        _fatal_msgbox(tr("error.pytorch_load_failed", error=e), tr("error.title"))
         return False
 
     # Check audio device
@@ -56,7 +57,8 @@ def check_environment() -> bool:
         logger.info("Audio input: %s", default_in["name"])
     except Exception as e:
         logger.error("No audio input device: %s", e)
-        _fatal_msgbox(f"未检测到麦克风: {e}")
+        from i18n import tr
+        _fatal_msgbox(tr("error.no_microphone", error=e), tr("error.title"))
         return False
 
     return True
@@ -136,6 +138,11 @@ def main():
             qt_app.setWindowIcon(QIcon(icon_path))
             break
 
+    # Initialize i18n before any UI text
+    settings = SettingsManager()
+    from i18n import init_language, tr
+    init_language(settings)
+
     # Show splash screen
     from ui.splash_screen import SplashScreen
     splash = SplashScreen()
@@ -151,7 +158,6 @@ def main():
     # Load ASR model (main thread blocks, but splash is visible)
     splash.set_status("Loading ASR model...")
     qt_app.processEvents()
-    settings = SettingsManager()
     asr_engine = load_asr_engine(settings)
     atexit.register(asr_engine.unload_model)
 
@@ -178,7 +184,7 @@ def main():
         logger.info("Interrupted by user")
     except Exception:
         logger.exception("Unhandled exception")
-        _fatal_msgbox("程序发生未处理的异常，请查看日志文件。")
+        _fatal_msgbox(tr("error.unhandled_exception"), tr("error.title"))
         sys.exit(1)
 
 
@@ -186,5 +192,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        _fatal_msgbox(f"启动失败: {e}")
+        _fatal_msgbox(f"Startup failed / 启动失败: {e}")
         sys.exit(1)

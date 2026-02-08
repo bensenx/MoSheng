@@ -113,7 +113,8 @@ class SpeakerVerifier:
             (success, message) tuple
         """
         if not self.is_ready:
-            return False, "模型未加载"
+            from i18n import tr
+            return False, tr("verifier.model_not_loaded")
 
         embeddings = []
         for i, audio in enumerate(audio_samples):
@@ -131,7 +132,8 @@ class SpeakerVerifier:
                                 (norm(emb_array[i]) * norm(emb_array[j])))
                 logger.info("Enrollment pairwise similarity [%d,%d]: %.4f", i, j, cos_sim)
                 if cos_sim < self._threshold:
-                    return False, f"样本 {i+1} 和 {j+1} 的声纹差异过大 (相似度: {cos_sim:.2f})，请在安静环境下重新录制"
+                    from i18n import tr
+                    return False, tr("verifier.samples_too_different", i=i+1, j=j+1, score=f"{cos_sim:.2f}")
 
         centroid = emb_array.mean(axis=0)  # (192,)
 
@@ -150,7 +152,8 @@ class SpeakerVerifier:
 
         self._centroid = centroid
         logger.info("Speaker enrolled with %d samples", len(audio_samples))
-        return True, "声纹注册成功"
+        from i18n import tr
+        return True, tr("verifier.enrollment_success")
 
     # --- Verification (two-tier) ---
 

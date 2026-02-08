@@ -37,6 +37,7 @@ if os.path.isfile(SETTINGS_FILE) and not os.path.isfile(VOCABULARY_FILE):
 
 # Default settings
 DEFAULT_SETTINGS = {
+    "language": None,
     "hotkey": {
         "keys": ["ctrl", "left windows"],
         "display": "Ctrl + Win",

@@ -10,11 +10,12 @@ from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QButtonGroup, QComboBox, QDialog, QGroupBox,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton,
+    QHBoxLayout, QLabel, QLineEdit, QMessageBox, QPushButton,
     QDoubleSpinBox, QRadioButton, QVBoxLayout, QWidget,
 )
 
 from config import ASSETS_DIR, VOCABULARY_FILE
+from i18n import tr, get_language, SUPPORTED_LANGUAGES
 from settings_manager import SettingsManager
 from ui.styles import (
     COLOR_ACCENT, COLOR_TEXT_SECONDARY, IconGroupBox, ToggleSwitch,
@@ -37,7 +38,7 @@ class SettingsWindow(QDialog):
         self._hotkey_keys: list[str] = []
         self._input_devices: list[tuple[int | None, str]] = []
 
-        self.setWindowTitle("MoSheng 设置")
+        self.setWindowTitle(tr("settings.title"))
         self.setMinimumWidth(460)
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
@@ -96,13 +97,13 @@ class SettingsWindow(QDialog):
 
         title_col = QVBoxLayout()
         title_col.setSpacing(0)
-        title_label = QLabel("墨声")
+        title_label = QLabel(tr("settings.app_name"))
         title_label.setStyleSheet(
             f"font-size: 20px; font-weight: 700; color: {COLOR_ACCENT};"
             " background: transparent;"
         )
         title_col.addWidget(title_label)
-        subtitle_label = QLabel("MoSheng \u00b7 本地智能语音输入")
+        subtitle_label = QLabel(tr("settings.subtitle"))
         subtitle_label.setStyleSheet(
             f"font-size: 11px; color: {COLOR_TEXT_SECONDARY};"
             " background: transparent;"
@@ -114,14 +115,33 @@ class SettingsWindow(QDialog):
         main_layout.addLayout(header)
         main_layout.addSpacing(8)
 
+        # --- Language Selector ---
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(QLabel(tr("settings.language_label")))
+        self._lang_combo = QComboBox()
+        for code, name in SUPPORTED_LANGUAGES.items():
+            self._lang_combo.addItem(name, code)
+        current_lang = s.get("language", default=get_language())
+        for i in range(self._lang_combo.count()):
+            if self._lang_combo.itemData(i) == current_lang:
+                self._lang_combo.setCurrentIndex(i)
+                break
+        lang_row.addWidget(self._lang_combo)
+        restart_hint = QLabel(tr("settings.restart_hint"))
+        restart_hint.setObjectName("secondaryLabel")
+        lang_row.addWidget(restart_hint)
+        lang_row.addStretch()
+        main_layout.addLayout(lang_row)
+        main_layout.addSpacing(4)
+
         # --- Hotkey Section ---
-        hk_group = IconGroupBox("快捷键设置", "keyboard")
+        hk_group = IconGroupBox(tr("settings.hotkey_section"), "keyboard")
         hk_layout = QVBoxLayout(hk_group)
         hk_layout.setSpacing(12)
 
         # Row 1: hotkey display + bind button
         row1 = QHBoxLayout()
-        row1.addWidget(QLabel("录音快捷键"))
+        row1.addWidget(QLabel(tr("settings.hotkey_label")))
 
         self._hotkey_keys = list(s.get("hotkey", "keys", default=["ctrl", "left windows"]))
         self._hotkey_edit = QLineEdit(
@@ -131,7 +151,7 @@ class SettingsWindow(QDialog):
         self._hotkey_edit.setFixedWidth(160)
         row1.addWidget(self._hotkey_edit)
 
-        self._bind_btn = QPushButton("修改绑定")
+        self._bind_btn = QPushButton(tr("settings.change_binding"))
         self._bind_btn.clicked.connect(self._start_hotkey_capture)
         row1.addWidget(self._bind_btn)
         row1.addStretch()
@@ -139,11 +159,11 @@ class SettingsWindow(QDialog):
 
         # Row 2: recording mode
         row2 = QHBoxLayout()
-        row2.addWidget(QLabel("录音模式"))
+        row2.addWidget(QLabel(tr("settings.mode_label")))
 
         self._mode_group = QButtonGroup(self)
-        self._push_radio = QRadioButton("按住录音")
-        self._toggle_radio = QRadioButton("按键切换")
+        self._push_radio = QRadioButton(tr("settings.push_to_talk"))
+        self._toggle_radio = QRadioButton(tr("settings.toggle_mode"))
         self._mode_group.addButton(self._push_radio)
         self._mode_group.addButton(self._toggle_radio)
 
@@ -160,7 +180,7 @@ class SettingsWindow(QDialog):
 
         # Row 3: progressive input toggle
         self._progressive_toggle = ToggleSwitch(
-            "渐进式输入（停顿时自动输入已识别文本）",
+            tr("settings.progressive_input"),
             checked=s.get("hotkey", "progressive", default=False),
         )
         self._progressive_toggle.toggled.connect(self._on_progressive_toggled)
@@ -172,7 +192,7 @@ class SettingsWindow(QDialog):
         prog_layout.setContentsMargins(24, 0, 0, 0)
         prog_layout.setSpacing(16)
 
-        prog_layout.addWidget(QLabel("静音阈值"))
+        prog_layout.addWidget(QLabel(tr("settings.silence_threshold")))
         self._threshold_spin = QDoubleSpinBox()
         self._threshold_spin.setRange(0.005, 0.200)
         self._threshold_spin.setSingleStep(0.005)
@@ -182,7 +202,7 @@ class SettingsWindow(QDialog):
         )
         prog_layout.addWidget(self._threshold_spin)
 
-        prog_layout.addWidget(QLabel("静音时长(秒)"))
+        prog_layout.addWidget(QLabel(tr("settings.silence_duration")))
         self._duration_spin = QDoubleSpinBox()
         self._duration_spin.setRange(0.3, 3.0)
         self._duration_spin.setSingleStep(0.1)
@@ -199,12 +219,12 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(hk_group)
 
         # --- ASR Section ---
-        asr_group = IconGroupBox("语音识别", "waveform")
+        asr_group = IconGroupBox(tr("settings.asr_section"), "waveform")
         asr_layout = QVBoxLayout(asr_group)
         asr_layout.setSpacing(12)
 
         row3 = QHBoxLayout()
-        row3.addWidget(QLabel("ASR 模型"))
+        row3.addWidget(QLabel(tr("settings.asr_model")))
         model_combo = QComboBox()
         model_combo.addItem("Qwen3-ASR-1.7B")
         model_combo.setEnabled(False)
@@ -213,7 +233,7 @@ class SettingsWindow(QDialog):
         asr_layout.addLayout(row3)
 
         row4 = QHBoxLayout()
-        row4.addWidget(QLabel("推理设备"))
+        row4.addWidget(QLabel(tr("settings.device_label")))
         self._device_combo = QComboBox()
         devices = self._get_cuda_devices()
         self._device_combo.addItems(devices)
@@ -228,11 +248,11 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(asr_group)
 
         # --- Audio Input Section ---
-        mic_group = IconGroupBox("音频输入", "microphone")
+        mic_group = IconGroupBox(tr("settings.audio_section"), "microphone")
         mic_layout = QVBoxLayout(mic_group)
 
         row_mic = QHBoxLayout()
-        row_mic.addWidget(QLabel("麦克风"))
+        row_mic.addWidget(QLabel(tr("settings.microphone")))
         self._mic_combo = QComboBox()
         self._input_devices = self._get_input_devices()
         for _, name in self._input_devices:
@@ -250,17 +270,17 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(mic_group)
 
         # --- Speaker Verification Section ---
-        sv_group = IconGroupBox("声纹识别", "shield")
+        sv_group = IconGroupBox(tr("settings.speaker_section"), "shield")
         sv_layout = QVBoxLayout(sv_group)
         sv_layout.setSpacing(10)
 
         self._sv_toggle = ToggleSwitch(
-            "启用声纹验证",
+            tr("settings.enable_speaker"),
             checked=s.get("speaker_verification", "enabled", default=False),
         )
         sv_layout.addWidget(self._sv_toggle)
 
-        sv_hint = QLabel("注册声纹后，将自动过滤其他人的语音输入")
+        sv_hint = QLabel(tr("settings.speaker_hint"))
         sv_hint.setObjectName("secondaryLabel")
         sv_hint.setWordWrap(True)
         sv_layout.addWidget(sv_hint)
@@ -270,7 +290,7 @@ class SettingsWindow(QDialog):
         self._sv_status_label.setObjectName("secondaryLabel")
         sv_btn_row.addWidget(self._sv_status_label)
         sv_btn_row.addStretch()
-        self._enroll_btn = QPushButton("录制声纹")
+        self._enroll_btn = QPushButton(tr("settings.enroll_voice"))
         self._enroll_btn.clicked.connect(self._open_enrollment)
         sv_btn_row.addWidget(self._enroll_btn)
         sv_layout.addLayout(sv_btn_row)
@@ -278,24 +298,24 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(sv_group)
 
         # --- Output Section ---
-        out_group = IconGroupBox("输出设置", "gear")
+        out_group = IconGroupBox(tr("settings.output_section"), "gear")
         out_layout = QVBoxLayout(out_group)
         out_layout.setSpacing(10)
 
         self._sound_toggle = ToggleSwitch(
-            "录音开始/结束提示音",
+            tr("settings.sound_toggle"),
             checked=s.get("output", "sound_enabled", default=True),
         )
         out_layout.addWidget(self._sound_toggle)
 
         self._overlay_toggle = ToggleSwitch(
-            "显示悬浮状态窗口",
+            tr("settings.overlay_toggle"),
             checked=s.get("output", "overlay_enabled", default=True),
         )
         out_layout.addWidget(self._overlay_toggle)
 
         self._restore_toggle = ToggleSwitch(
-            "粘贴后恢复剪贴板",
+            tr("settings.restore_clipboard"),
             checked=s.get("output", "restore_clipboard", default=True),
         )
         out_layout.addWidget(self._restore_toggle)
@@ -303,28 +323,28 @@ class SettingsWindow(QDialog):
         main_layout.addWidget(out_group)
 
         # --- Vocabulary Section ---
-        vocab_group = IconGroupBox("自定义词汇", "book")
+        vocab_group = IconGroupBox(tr("settings.vocab_section"), "book")
         vocab_layout = QVBoxLayout(vocab_group)
         vocab_layout.setSpacing(8)
 
         self._vocab_toggle = ToggleSwitch(
-            "启用生词辅助识别",
+            tr("settings.vocab_toggle"),
             checked=s.get("vocabulary", "enabled", default=True),
         )
         vocab_layout.addWidget(self._vocab_toggle)
 
-        hint = QLabel("在 CSV 文件中添加专业术语、人名等，每行一个词汇")
+        hint = QLabel(tr("settings.vocab_hint"))
         hint.setObjectName("secondaryLabel")
         hint.setWordWrap(True)
         vocab_layout.addWidget(hint)
 
         vocab_row = QHBoxLayout()
         word_count = self._count_vocab_words()
-        self._vocab_count_label = QLabel(f"已收录 {word_count} 个词汇")
+        self._vocab_count_label = QLabel(tr("settings.vocab_count", count=word_count))
         self._vocab_count_label.setObjectName("secondaryLabel")
         vocab_row.addWidget(self._vocab_count_label)
         vocab_row.addStretch()
-        open_btn = QPushButton("打开词汇表")
+        open_btn = QPushButton(tr("settings.open_vocab"))
         open_btn.clicked.connect(self._open_vocab_file)
         vocab_row.addWidget(open_btn)
         vocab_layout.addLayout(vocab_row)
@@ -336,12 +356,12 @@ class SettingsWindow(QDialog):
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
-        save_btn = QPushButton("保存")
+        save_btn = QPushButton(tr("settings.save"))
         save_btn.setObjectName("primaryButton")
         save_btn.clicked.connect(self._on_save_click)
         btn_layout.addWidget(save_btn)
 
-        cancel_btn = QPushButton("取消")
+        cancel_btn = QPushButton(tr("settings.cancel"))
         cancel_btn.clicked.connect(self.close)
         btn_layout.addWidget(cancel_btn)
 
@@ -364,11 +384,11 @@ class SettingsWindow(QDialog):
                     import json
                     with open(meta_path, encoding="utf-8") as f:
                         meta = json.load(f)
-                    return f"已注册 ({meta.get('sample_count', '?')} 个样本)"
+                    return tr("settings.enrolled_samples", count=meta.get('sample_count', '?'))
                 except Exception:
                     pass
-            return "已注册"
-        return "未注册声纹"
+            return tr("settings.enrolled")
+        return tr("settings.not_enrolled")
 
     def _open_enrollment(self) -> None:
         from ui.enrollment_dialog import EnrollmentDialog
@@ -382,7 +402,7 @@ class SettingsWindow(QDialog):
     # --- Device discovery ---
 
     def _get_input_devices(self) -> list[tuple[int | None, str]]:
-        result: list[tuple[int | None, str]] = [(None, "系统默认")]
+        result: list[tuple[int | None, str]] = [(None, tr("settings.system_default"))]
         try:
             import sounddevice as sd
             devices = sd.query_devices()
@@ -412,11 +432,11 @@ class SettingsWindow(QDialog):
     def _start_hotkey_capture(self) -> None:
         self._capturing_hotkey = True
         self._captured_keys.clear()
-        self._bind_btn.setText("请按下快捷键...")
+        self._bind_btn.setText(tr("settings.press_hotkey"))
         self._bind_btn.setObjectName("dangerButton")
         self._bind_btn.style().unpolish(self._bind_btn)
         self._bind_btn.style().polish(self._bind_btn)
-        self._hotkey_edit.setText("等待输入...")
+        self._hotkey_edit.setText(tr("settings.waiting_input"))
         self._hotkey_hook = keyboard.hook(self._on_capture_key, suppress=False)
 
     def _on_capture_key(self, event: keyboard.KeyboardEvent) -> None:
@@ -456,7 +476,7 @@ class SettingsWindow(QDialog):
     @Slot(str)
     def _finish_capture(self, display: str) -> None:
         self._hotkey_edit.setText(display)
-        self._bind_btn.setText("修改绑定")
+        self._bind_btn.setText(tr("settings.change_binding"))
         self._bind_btn.setObjectName("")
         self._bind_btn.style().unpolish(self._bind_btn)
         self._bind_btn.style().polish(self._bind_btn)
@@ -476,7 +496,7 @@ class SettingsWindow(QDialog):
         if not os.path.isfile(VOCABULARY_FILE):
             os.makedirs(os.path.dirname(VOCABULARY_FILE), exist_ok=True)
             with open(VOCABULARY_FILE, "w", encoding="utf-8") as f:
-                f.write("# 每行一个词汇（专业术语、人名等），帮助语音识别更准确\n")
+                f.write(tr("settings.vocab_file_header"))
         # Open the folder and select the file in Explorer
         import subprocess
         subprocess.Popen(["explorer", "/select,", VOCABULARY_FILE])
@@ -510,6 +530,10 @@ class SettingsWindow(QDialog):
 
             self._settings.set("speaker_verification", "enabled", self._sv_toggle.isChecked())
 
+            new_lang = self._lang_combo.currentData()
+            lang_changed = new_lang != get_language()
+            self._settings.set("language", new_lang)
+
             self._settings.save()
             logger.info("Settings saved: mode=%s, hotkey=%s", mode, self._hotkey_keys)
 
@@ -519,6 +543,12 @@ class SettingsWindow(QDialog):
             logger.exception("Failed to save settings")
 
         self.close()
+
+        if lang_changed:
+            QMessageBox.information(
+                None, tr("settings.title"),
+                tr("settings.restart_required"),
+            )
 
     def closeEvent(self, event) -> None:
         if self._hotkey_hook is not None:

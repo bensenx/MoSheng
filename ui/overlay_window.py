@@ -58,8 +58,8 @@ class OverlayWindow:
     Five curves with distinct ink colors respond to 5 frequency bands.
     """
 
-    HEIGHT = 72
-    WIDTH_RATIO = 0.18
+    HEIGHT = 140
+    WIDTH_RATIO = 0.07
     MARGIN = 32
     RESULT_DISPLAY_MS = 1500
     FRAME_INTERVAL_MS = 33  # ~30 fps for RMS polling
@@ -228,7 +228,12 @@ class OverlayWindow:
                 self._root.setProperty(name, 0.0)
 
     def _compute_bands(self) -> np.ndarray | None:
-        """Compute 8 logarithmic frequency bands from recent audio (normalized 0-1)."""
+        """Compute 8 logarithmic frequency bands from recent audio (normalized 0-1).
+
+        Bands are normalized by peak then scaled by current RMS so that
+        quiet ambient noise produces small values while loud voice
+        produces large values.
+        """
         if self._recorder is None:
             return None
         samples = self._recorder.get_recent_samples(_FFT_SIZE)
@@ -247,6 +252,11 @@ class OverlayWindow:
         peak = np.max(bands)
         if peak > 1e-6:
             bands /= peak
+
+        # Scale by volume so quiet sounds → small, loud voice → large
+        rms = self._recorder.current_rms
+        vol_scale = min(rms * 50.0, 1.0)
+        bands *= vol_scale
         return bands
 
     # --- Frame tick (RMS + FFT polling) ---
@@ -260,7 +270,9 @@ class OverlayWindow:
             raw_bands = self._compute_bands()
             if raw_bands is not None:
                 bands5 = self._aggregate_to_5(raw_bands)
-                self._band_smooth += 0.4 * (bands5 - self._band_smooth)
+                # Asymmetric smoothing: fast attack (0.6), slower decay (0.25)
+                alpha = np.where(bands5 > self._band_smooth, 0.6, 0.25)
+                self._band_smooth += alpha * (bands5 - self._band_smooth)
                 self._push_bands(self._band_smooth)
                 # Log once per second for diagnostic
                 if not hasattr(self, '_band_log_count'):

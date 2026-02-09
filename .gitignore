@@ -37,3 +37,8 @@ nul
 dist/
 build/
 mirror.env
+
+# Private development docs (not for public repo)
+DevJourney.md
+FuturePlan.md
+docs/plans/

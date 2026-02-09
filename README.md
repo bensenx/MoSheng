@@ -41,17 +41,18 @@
 
 ## 五色墨韵 ✨
 
-说话时，屏幕底部浮现**五色墨韵**波形：
+说话时，屏幕浮现**五色墨韵**波形 — 五条曲线以不同深浅的冷调墨色层叠流动：
 
-| 曲线 | 颜色 | 频段 |
-|------|------|------|
-| 松烟墨 | ██ | Bass |
-| 靛蓝 | ██ | Low-mid |
-| 赭石 | ██ | Mid |
-| 朱砂 | ██ | High-mid |
-| 藤黄 | ██ | Treble |
+| 曲线 | 颜色 | 层级 | 频段 |
+|------|------|------|------|
+| 墨灰 | ink grey | 远景 | Bass |
+| 钢蓝 | steel blue | 中景 | Low-mid |
+| 暗蓝 | dark blue | **主曲线** | Mid |
+| 霜蓝 | frost blue | 中景 | High-mid |
+| 冷银 | cool silver | 远景 | Treble |
 
-五种传统中国墨色映射五个声音频段，GPU Shader (GLSL) 实时渲染。
+GPU Shader (GLSL) 实时渲染，中心对称波形，主曲线居中凸显，远景曲线半透明衬托，
+呈现水墨般的层次感和纵深。
 
 **声音，真的化为了笔墨。**
 
@@ -65,7 +66,7 @@
 <a name="features"></a>
 ## 功能亮点
 
-- 🎨 **五色墨韵** — QML + GPU Shader 频谱可视化，五种传统墨色随声波流动
+- 🎨 **五色墨韵** — QML + GPU Shader 频谱可视化，冷调墨色层叠流动
 - 🎤 **双快捷键** — `CapsLock` 按住录音 (PTT) / `Right Ctrl` 按键切换
 - ⚡ **渐进式输入** — 说话停顿时自动注入已识别文本，无需等待说完
 - 🔒 **声纹识别** — SpeechBrain ECAPA-TDNN 两级验证，只响应注册用户
@@ -201,7 +202,7 @@ assets/
 Hold `CapsLock` → speak → release → text is automatically pasted into any application. 100% local, no internet required.
 
 **Key Features:**
-- Five-color ink wash GPU shader visualization (松烟墨/靛蓝/赭石/朱砂/藤黄)
+- Five-color ink wash GPU shader visualization with layered cold-tone curves
 - Push-to-talk (CapsLock) and toggle (Right Ctrl) modes
 - Progressive input — auto-inject text during speech pauses
 - Speaker verification — responds only to registered voice

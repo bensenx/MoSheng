@@ -27,6 +27,9 @@ settings_manager.py     用户设置持久化 (~/.mosheng/settings.json)
 pyproject.toml          UV 项目配置（依赖、CUDA 索引、构建）
 launcher.py             分发包入口（仅 stdlib，PyInstaller 编译为 MoSheng.exe）
 _setup.cmd              首次运行安装脚本（GPU 检测、镜像选择、uv sync）
+assets/
+  shaders/smoke.frag    GLSL 片段着色器源码（五色冷墨韵波形，中心对称 cos 波）
+  shaders/smoke.frag.qsb  pyside6-qsb 编译产物
 core/
   asr_base.py           ASR 抽象基类 (ABC)，可替换模型
   asr_qwen.py           Qwen3-ASR-1.7B 实现（含音频诊断日志）
@@ -38,7 +41,9 @@ core/
 ui/
   app.py                QSystemTrayIcon + WorkerThread 组件协调器（核心调度）
   splash_screen.py      启动加载界面（glassmorphism，模型加载期间显示）
-  overlay_window.py     QWidget 悬浮状态窗口（录音中/识别中/结果/已过滤），click-through + fade animation
+  overlay_window.py     QQuickView + GLSL shader 悬浮窗（五色冷墨韵波形），FFT 5 频段驱动，click-through
+  overlay.qml           ShaderEffect 承载，暴露 amplitude/stateBrightness/stateHue/b0-b4 属性
+  shaders/smoke.frag.qsb  编译后的 GLSL 片段着色器（pyside6-qsb 生成）
   enrollment_dialog.py  声纹注册引导对话框（3 段录音 + 背景线程处理）
   settings_window.py    QDialog 设置界面（Glassmorphism + DWM Acrylic backdrop）
   styles.py             Glassmorphism QSS + 颜色常量 + ToggleSwitch + load_icon_pixmap + draw_section_icon
@@ -122,12 +127,21 @@ uv run python scripts/build_dist.py
 ### PySide6 / Qt
 - `QApplication.setQuitOnLastWindowClosed(False)` — 托盘应用必须设置，否则关闭设置窗口会退出程序
 - 跨线程 UI 更新用 Qt 信号/槽（自动 `QueuedConnection`）或 `QMetaObject.invokeMethod`
+- Overlay 已从 QWidget 迁移到 QQuickView + GLSL ShaderEffect（GPU 渲染）
 - Overlay click-through 用 `winId()` 直接获取 HWND + Windows API `SetWindowLongW`
 - `Qt.WA_TranslucentBackground` + `paintEvent` 中 `QPainter.drawRoundedRect` 实现圆角透明窗口
 - QSS 样式表集中在 `ui/styles.py`，全局应用于 `QApplication`
 - 统一图标渲染：`load_icon_pixmap(logical_size)` + `draw_section_icon()` 以屏幕实际 DPR 渲染（`_screen_dpr()`），避免非整数缩放模糊
 - Splash screen 不用 DWM Acrylic（会产生系统边框），仅 `WA_TranslucentBackground` + `paintEvent`
 - Splash 直接设 `setWindowOpacity(1.0)`，主线程阻塞时 fade-in 动画不运行
+
+### Overlay GLSL Shader (smoke.frag)
+- 五色冷墨韵调色板：墨灰、钢蓝、暗蓝（主色）、霜蓝、冷银，全部偏冷色系
+- 每条曲线独立中心对称：用 `cos(dx_center * freq)` 而非 `abs()` + `cos()`，`cos` 偶函数天然对称且 C∞ 光滑（`abs()` 在中心有导数不连续的尖角）
+- 后→前渲染顺序 `[0,4,1,3,2]`，每层独立线宽/辉光/透明度/亮度/阴影参数
+- Gaussian 包络控制每条曲线的水平区域，peakX `[0.25..0.75]` 集中在中心区域
+- 编译：`pyside6-qsb --glsl "100 es,120,150,300 es,440" --hlsl 50 --msl 12 -o ui/shaders/smoke.frag.qsb assets/shaders/smoke.frag`，编辑 `.frag` 后必须重新编译 `.qsb`
+- FFT 5 频段从 Python 端 `_compute_bands()` 推送，经非对称 EMA 平滑（attack 0.6 / decay 0.25）
 
 ### keyboard 库
 - 快捷键监听已改用 WH_KEYBOARD_LL 钩子（`key_suppression_hook.py`），keyboard 库仅用于设置窗口的快捷键捕获 UI 和 VK 码表查询

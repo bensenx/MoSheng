@@ -42,6 +42,18 @@ COLOR_IDLE_TRAY = "#6c7086"
 COLOR_OVERLAY_BG = "#1a1a24"
 COLOR_OVERLAY_TEXT = "#e0e0e8"
 
+# Ink waveform overlay colors (水墨风格)
+COLOR_INK_RECORDING = "#7b8fa8"      # 淡墨蓝灰
+COLOR_INK_RECOGNIZING = "#d4a857"    # 淡金琥珀
+COLOR_INK_FILTERED = "#6c7086"       # 灰
+
+# Five-color ink palette (五色墨韵) — documentary reference, hardcoded in shader
+COLOR_INK_PINE_SOOT = "#2d3436"   # 松烟墨 (Bass)
+COLOR_INK_INDIGO = "#4a6fa5"       # 靛蓝 (Low-mid)
+COLOR_INK_OCHRE = "#b87333"        # 赭石 (Mid, center)
+COLOR_INK_CINNABAR = "#c24c40"     # 朱砂 (High-mid)
+COLOR_INK_GAMBOGE = "#d4a857"      # 藤黄 (Treble)
+
 # ---------------------------------------------------------------------------
 # Font
 # ---------------------------------------------------------------------------

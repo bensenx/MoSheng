@@ -22,6 +22,9 @@ class AudioRecorder:
         self._current_rms: float = 0.0
         self._smoothed_rms: float = 0.0
         self._rms_alpha: float = 0.6  # EMA smoothing factor (higher = more responsive)
+        # Ring buffer for FFT: keeps last 2048 samples (~128ms @ 16kHz)
+        self._recent = np.zeros(2048, dtype=np.float32)
+        self._recent_pos: int = 0
 
     @property
     def is_recording(self) -> bool:
@@ -88,6 +91,18 @@ class AudioRecorder:
                 self._current_rms = float(np.sqrt(np.mean(indata ** 2)))
                 self._smoothed_rms = (self._rms_alpha * self._current_rms
                                       + (1 - self._rms_alpha) * self._smoothed_rms)
+                # Update ring buffer for FFT
+                flat = indata[:, 0] if indata.ndim > 1 else indata.flatten()
+                n = len(flat)
+                pos = self._recent_pos
+                buf_len = len(self._recent)
+                if pos + n <= buf_len:
+                    self._recent[pos:pos + n] = flat
+                else:
+                    first = buf_len - pos
+                    self._recent[pos:] = flat[:first]
+                    self._recent[:n - first] = flat[first:]
+                self._recent_pos = (pos + n) % buf_len
 
     @property
     def device(self) -> int | None:
@@ -100,6 +115,16 @@ class AudioRecorder:
     @property
     def sample_rate(self) -> int:
         return self._sample_rate
+
+    def get_recent_samples(self, n_samples: int = 1024) -> np.ndarray:
+        """Return last n_samples from ring buffer (thread-safe, zero-copy read)."""
+        with self._lock:
+            pos = self._recent_pos
+        buf = self._recent  # numpy array, safe to read outside lock
+        if pos >= n_samples:
+            return buf[pos - n_samples:pos].copy()
+        else:
+            return np.concatenate([buf[-(n_samples - pos):], buf[:pos]]).copy()
 
     @property
     def current_rms(self) -> float:

@@ -251,7 +251,8 @@ class MoShengApp:
 
         # Overlay
         self._overlay = OverlayWindow(
-            enabled=settings.get("output", "overlay_enabled", default=True)
+            enabled=settings.get("output", "overlay_enabled", default=True),
+            recorder=self._recorder,
         )
 
         # Worker thread

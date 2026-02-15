@@ -78,5 +78,6 @@ class QwenASREngine(ASRBase):
         if self._model is not None:
             del self._model
             self._model = None
-            torch.cuda.empty_cache()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
             logger.info("Model unloaded")

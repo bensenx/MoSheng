@@ -486,15 +486,21 @@ class SettingsWindow(QDialog):
         return result
 
     def _get_cuda_devices(self) -> list[str]:
+        import sys
         devices = ["cpu"]
         try:
             import torch
-            for i in range(torch.cuda.device_count()):
-                torch.cuda.get_device_name(i)
-                devices.append(f"cuda:{i}")
+            if sys.platform == "darwin":
+                if torch.backends.mps.is_available():
+                    devices.append("mps")
+            else:
+                for i in range(torch.cuda.device_count()):
+                    torch.cuda.get_device_name(i)
+                    devices.append(f"cuda:{i}")
         except Exception:
             pass
-        return devices
+        # Always offer "auto" as first option
+        return ["auto"] + devices
 
     # --- Hotkey capture ---
 
@@ -616,7 +622,13 @@ class SettingsWindow(QDialog):
             with open(VOCABULARY_FILE, "w", encoding="utf-8") as f:
                 f.write(tr("settings.vocab_file_header"))
         import subprocess
-        subprocess.Popen(["explorer", "/select,", VOCABULARY_FILE])
+        import sys
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", VOCABULARY_FILE])
+        elif sys.platform == "win32":
+            subprocess.Popen(["explorer", "/select,", VOCABULARY_FILE])
+        else:
+            subprocess.Popen(["xdg-open", VOCABULARY_FILE])
 
     # --- Save / Cancel ---
 

@@ -10,7 +10,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QMessageBox,
     QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QDoubleSpinBox, QSpinBox, QVBoxLayout, QWidget,
+    QDoubleSpinBox, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
 )
 
 from config import ASSETS_DIR, ASR_MODELS, VOCABULARY_FILE
@@ -64,7 +64,9 @@ class SettingsWindow(QDialog):
                 break
 
         self._build_ui()
-        self.adjustSize()
+        self.setMinimumHeight(400)
+        self.setMaximumHeight(800)
+        self.resize(self.minimumWidth(), 700)
         self._center_on_screen()
 
     def showEvent(self, event) -> None:
@@ -129,6 +131,19 @@ class SettingsWindow(QDialog):
         main_layout.addLayout(header)
         main_layout.addSpacing(8)
 
+        # --- Scrollable content area ---
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(scroll.Shape.NoFrame)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        scroll_widget = QWidget()
+        scroll_widget.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(scroll_widget)
+        content_layout.setSpacing(8)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        scroll.setWidget(scroll_widget)
+        main_layout.addWidget(scroll, 1)
+
         # --- Language & Autostart (merged row) ---
         lang_row = QHBoxLayout()
         lang_row.addWidget(QLabel(tr("settings.language_label")))
@@ -150,8 +165,8 @@ class SettingsWindow(QDialog):
             checked=is_autostart_enabled(),
         )
         lang_row.addWidget(self._autostart_toggle)
-        main_layout.addLayout(lang_row)
-        main_layout.addSpacing(4)
+        content_layout.addLayout(lang_row)
+        content_layout.addSpacing(4)
 
         # --- Hotkey Section (two-column PTT / Toggle) ---
         hk_group = IconGroupBox(tr("settings.hotkey_section"), "keyboard")
@@ -263,7 +278,7 @@ class SettingsWindow(QDialog):
         self._progressive_opts.setVisible(self._progressive_toggle.isChecked())
         hk_layout.addWidget(self._progressive_opts)
 
-        main_layout.addWidget(hk_group)
+        content_layout.addWidget(hk_group)
 
         # --- ASR Section ---
         asr_group = IconGroupBox(tr("settings.asr_section"), "waveform")
@@ -299,7 +314,7 @@ class SettingsWindow(QDialog):
         row4.addStretch()
         asr_layout.addLayout(row4)
 
-        main_layout.addWidget(asr_group)
+        content_layout.addWidget(asr_group)
 
         # --- Audio Input Section ---
         mic_group = IconGroupBox(tr("settings.audio_section"), "microphone")
@@ -321,7 +336,7 @@ class SettingsWindow(QDialog):
         row_mic.addStretch()
         mic_layout.addLayout(row_mic)
 
-        main_layout.addWidget(mic_group)
+        content_layout.addWidget(mic_group)
 
         # --- Speaker Verification Section ---
         sv_group = IconGroupBox(tr("settings.speaker_section"), "shield")
@@ -349,7 +364,7 @@ class SettingsWindow(QDialog):
         sv_btn_row.addWidget(self._enroll_btn)
         sv_layout.addLayout(sv_btn_row)
 
-        main_layout.addWidget(sv_group)
+        content_layout.addWidget(sv_group)
 
         # --- Output Section (horizontal toggles) ---
         out_group = IconGroupBox(tr("settings.output_section"), "gear")
@@ -375,7 +390,7 @@ class SettingsWindow(QDialog):
         out_layout.addWidget(self._restore_toggle)
         out_layout.addStretch()
 
-        main_layout.addWidget(out_group)
+        content_layout.addWidget(out_group)
 
         # --- Vocabulary Section ---
         vocab_group = IconGroupBox(tr("settings.vocab_section"), "book")
@@ -404,7 +419,7 @@ class SettingsWindow(QDialog):
         vocab_row.addWidget(open_btn)
         vocab_layout.addLayout(vocab_row)
 
-        main_layout.addWidget(vocab_group)
+        content_layout.addWidget(vocab_group)
 
         # --- Buttons ---
         main_layout.addSpacing(8)

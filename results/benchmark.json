@@ -1,0 +1,91 @@
+{
+  "system": {
+    "platform": "macOS-15.3.1-arm64-arm-64bit-Mach-O",
+    "processor": "arm",
+    "python": "3.14.3",
+    "torch": "2.10.0",
+    "cpu": "Apple M4",
+    "ram_gb": 16.0,
+    "mps_available": true
+  },
+  "results": [
+    {
+      "model": "Qwen3-ASR-0.6B",
+      "model_id": "Qwen/Qwen3-ASR-0.6B",
+      "device": "mps",
+      "load_time_s": 30.83,
+      "memory_mb": 1301.9,
+      "speed": [
+        {
+          "duration_s": 1.0,
+          "avg_time_s": 0.112,
+          "std_s": 0.0,
+          "rtf": 0.112
+        },
+        {
+          "duration_s": 2.0,
+          "avg_time_s": 0.793,
+          "std_s": 0.941,
+          "rtf": 0.396
+        },
+        {
+          "duration_s": 3.0,
+          "avg_time_s": 0.472,
+          "std_s": 0.469,
+          "rtf": 0.157
+        },
+        {
+          "duration_s": 5.0,
+          "avg_time_s": 0.323,
+          "std_s": 0.228,
+          "rtf": 0.065
+        },
+        {
+          "duration_s": 10.0,
+          "avg_time_s": 1.011,
+          "std_s": 1.119,
+          "rtf": 0.101
+        }
+      ]
+    },
+    {
+      "model": "Qwen3-ASR-1.7B",
+      "model_id": "Qwen/Qwen3-ASR-1.7B",
+      "device": "mps",
+      "load_time_s": 9.69,
+      "memory_mb": 0.0,
+      "speed": [
+        {
+          "duration_s": 1.0,
+          "avg_time_s": 0.248,
+          "std_s": 0.006,
+          "rtf": 0.248
+        },
+        {
+          "duration_s": 2.0,
+          "avg_time_s": 0.292,
+          "std_s": 0.054,
+          "rtf": 0.146
+        },
+        {
+          "duration_s": 3.0,
+          "avg_time_s": 0.293,
+          "std_s": 0.028,
+          "rtf": 0.098
+        },
+        {
+          "duration_s": 5.0,
+          "avg_time_s": 0.362,
+          "std_s": 0.056,
+          "rtf": 0.072
+        },
+        {
+          "duration_s": 10.0,
+          "avg_time_s": 0.466,
+          "std_s": 0.043,
+          "rtf": 0.047
+        }
+      ]
+    }
+  ]
+}

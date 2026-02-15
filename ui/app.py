@@ -307,6 +307,15 @@ class MoShengApp:
         # Keep a reference to prevent GC of the menu
         self._tray_menu = menu
 
+        # macOS: clicking Dock icon should open settings
+        import sys
+        if sys.platform == "darwin":
+            self._tray.activated.connect(self._on_tray_activated)
+            # Re-open settings when app is re-activated from Dock
+            QApplication.instance().applicationStateChanged.connect(
+                self._on_app_state_changed
+            )
+
         self._settings_window = None
 
     def start(self) -> None:
@@ -352,6 +361,21 @@ class MoShengApp:
                 if not icon.isNull():
                     return icon
         return None
+
+    # ---- macOS Dock integration ----
+
+    def _on_tray_activated(self, reason) -> None:
+        """Handle tray icon click — on macOS, open settings on trigger."""
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._open_settings()
+
+    def _on_app_state_changed(self, state) -> None:
+        """Handle Dock click — opens settings when app is re-activated."""
+        from PySide6.QtCore import Qt
+        if state == Qt.ApplicationState.ApplicationActive:
+            # Only open settings if no window is currently visible
+            if self._settings_window is None:
+                self._open_settings()
 
     # ---- Settings ----
 

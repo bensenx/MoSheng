@@ -87,6 +87,7 @@ def create_info_plist():
         "NSHighResolutionCapable": True,
         "NSMicrophoneUsageDescription": "MoSheng 需要麦克风权限来进行语音输入",
         "NSAppleEventsUsageDescription": "MoSheng 需要辅助功能来模拟键盘输入",
+        "LSArchitecturePriority": ["arm64"],
     }
     with open(os.path.join(CONTENTS, "Info.plist"), "wb") as f:
         plistlib.dump(plist, f)

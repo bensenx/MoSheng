@@ -109,10 +109,7 @@ class WorkerThread(QThread):
         logger.info("Recording start (progressive=%s)", self._progressive)
         self._recorder.start_recording()
         if self._settings.get("output", "sound_enabled", default=True):
-            import winsound
-            threading.Thread(
-                target=lambda: winsound.Beep(800, 100), daemon=True
-            ).start()
+            self._play_beep(800)
 
         if self._progressive:
             self._run_progressive_loop()
@@ -158,10 +155,7 @@ class WorkerThread(QThread):
         # Final flush
         audio = self._recorder.stop_recording()
         if self._settings.get("output", "sound_enabled", default=True):
-            import winsound
-            threading.Thread(
-                target=lambda: winsound.Beep(600, 100), daemon=True
-            ).start()
+            self._play_beep(600)
 
         final_ok = False
         min_dur = self._settings.get("audio", "min_duration", default=0.3)
@@ -178,13 +172,22 @@ class WorkerThread(QThread):
         elif not final_ok:
             self.state_changed.emit(STATE_IDLE, "")
 
+    @staticmethod
+    def _play_beep(freq: int = 800) -> None:
+        """Play a short beep using macOS afplay or system sound."""
+        import subprocess
+        threading.Thread(
+            target=lambda: subprocess.run(
+                ["afplay", "/System/Library/Sounds/Tink.aiff"],
+                capture_output=True,
+            ),
+            daemon=True,
+        ).start()
+
     def _handle_stop(self) -> None:
         audio = self._recorder.stop_recording()
         if self._settings.get("output", "sound_enabled", default=True):
-            import winsound
-            threading.Thread(
-                target=lambda: winsound.Beep(600, 100), daemon=True
-            ).start()
+            self._play_beep(600)
 
         if not self._flush_and_inject(audio):
             self.state_changed.emit(STATE_ERROR, tr("worker.too_short"))
@@ -280,8 +283,7 @@ class MoShengApp:
             on_stop=lambda: self._worker.enqueue(CMD_STOP),
         )
 
-        # Wire hotkey VK codes to the text injector
-        self._injector.hotkey_vks = self._hotkey.hotkey_vks
+        # (macOS: no VK suppression wiring needed)
 
         # Application icon (loaded from assets if available)
         self._app_icon = self._load_app_icon()
@@ -380,8 +382,6 @@ class MoShengApp:
             toggle_keys=toggle.get("keys", ["right ctrl"]),
             toggle_enabled=toggle.get("enabled", True),
         )
-        self._injector.hotkey_vks = self._hotkey.hotkey_vks
-
         self._injector.restore_clipboard = self._settings.get(
             "output", "restore_clipboard", default=True
         )
@@ -464,7 +464,12 @@ class MoShengApp:
         from config import SPEAKER_DIR
         from core.speaker_verifier import SpeakerVerifier
 
-        device = self._settings.get("asr", "device", default="cuda:0")
+        device_setting = self._settings.get("asr", "device", default="auto")
+        if device_setting in ("auto", "cuda:0"):
+            import torch
+            device = "mps" if torch.backends.mps.is_available() else "cpu"
+        else:
+            device = device_setting
         verifier = SpeakerVerifier(device=device)
         verifier.load_model()
         verifier.load_enrollment(SPEAKER_DIR)

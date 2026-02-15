@@ -51,14 +51,14 @@ DEFAULT_SETTINGS = {
     "hotkey": {
         "push_to_talk": {
             "enabled": True,
-            "keys": ["caps lock"],
-            "display": "Caps Lock",
+            "keys": ["right command"],
+            "display": "Right Command",
             "long_press_ms": 300,
         },
         "toggle": {
             "enabled": True,
-            "keys": ["right ctrl"],
-            "display": "Right Ctrl",
+            "keys": ["fn", "f5"],
+            "display": "Fn+F5",
         },
         "progressive": False,
         "silence_threshold": 0.01,
@@ -67,7 +67,7 @@ DEFAULT_SETTINGS = {
     "asr": {
         "model_name": "Qwen3-ASR-1.7B",
         "model_id": "Qwen/Qwen3-ASR-1.7B",
-        "device": "cuda:0",
+        "device": "auto",
         "dtype": "bfloat16",
         "max_new_tokens": 256,
     },

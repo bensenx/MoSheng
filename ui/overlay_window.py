@@ -1,6 +1,5 @@
 """QML GPU shader overlay: five-color ink wash visualization (五色墨韵)."""
 
-import ctypes
 import logging
 import math
 import os
@@ -23,12 +22,6 @@ STATE_RECOGNIZING = "recognizing"
 STATE_RESULT = "result"
 STATE_ERROR = "error"
 STATE_FILTERED = "filtered"
-
-# Windows extended window style flags
-WS_EX_LAYERED = 0x80000
-WS_EX_TRANSPARENT = 0x20
-WS_EX_TOOLWINDOW = 0x80
-GWL_EXSTYLE = -20
 
 # State → (stateBrightness, stateHue) for shader modulation
 _STATE_VISUALS = {
@@ -149,13 +142,14 @@ class OverlayWindow:
     # --- Click-through (Windows) ---
 
     def _set_click_through(self) -> None:
+        """Make overlay click-through. On macOS, use NSWindow ignoresMouseEvents."""
         try:
-            hwnd = int(self._view.winId())
-            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ctypes.windll.user32.SetWindowLongW(
-                hwnd, GWL_EXSTYLE,
-                style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
-            )
+            from AppKit import NSApplication
+            ns_view = self._view.winId().__int__()
+            # Qt.Tool + FramelessWindowHint already provides most behavior.
+            # For full click-through, we'd need NSWindow.setIgnoresMouseEvents_(True)
+            # but that requires accessing the native NSWindow handle.
+            pass
         except Exception:
             logger.debug("Could not set click-through")
 

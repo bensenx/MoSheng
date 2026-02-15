@@ -51,7 +51,9 @@ class SettingsWindow(QDialog):
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        import sys
+        if sys.platform != "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setObjectName("settingsRoot")
 
@@ -67,11 +69,18 @@ class SettingsWindow(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        hwnd = int(self.winId())
-        if not apply_acrylic_effect(hwnd):
+        import sys
+        if sys.platform == "darwin":
+            # No DWM acrylic on macOS — use solid fallback
             self.setObjectName("settingsFallback")
             self.style().unpolish(self)
             self.style().polish(self)
+        else:
+            hwnd = int(self.winId())
+            if not apply_acrylic_effect(hwnd):
+                self.setObjectName("settingsFallback")
+                self.style().unpolish(self)
+                self.style().polish(self)
 
     def _center_on_screen(self) -> None:
         from PySide6.QtWidgets import QApplication

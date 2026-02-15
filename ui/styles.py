@@ -64,43 +64,37 @@ FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif
 # ---------------------------------------------------------------------------
 
 def apply_acrylic_effect(hwnd: int) -> bool:
-    """Apply Windows 11 Acrylic (true frosted glass) backdrop. Returns True on success."""
+    """Apply platform-specific translucent backdrop. Returns True on success.
+
+    On macOS this is a no-op — Qt's WA_TranslucentBackground handles transparency.
+    The Windows DWM Acrylic path is only available on Windows.
+    """
+    import sys
+    if sys.platform == "darwin":
+        return False
     try:
-        # DWMWA_SYSTEMBACKDROP_TYPE = 38  (Windows 11 22H2+)
-        # Value 3 = DWMSBT_TRANSIENTWINDOW (Acrylic — real frosted glass, shows blurred desktop)
-        # Value 4 = DWMSBT_TABBEDWINDOW (Mica Alt — wallpaper tinted, no real transparency)
         attr = 38
-        value = ctypes.c_int(3)  # Acrylic first for true transparency
+        value = ctypes.c_int(3)
         hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
         )
         if hr != 0:
-            # Fallback: try Mica Alt (value 4)
             value = ctypes.c_int(4)
             hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
                 hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
             )
-
-        # Also enable dark mode title bar
-        # DWMWA_USE_IMMERSIVE_DARK_MODE = 20
         dark = ctypes.c_int(1)
         ctypes.windll.dwmapi.DwmSetWindowAttribute(
             hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark)
         )
 
-        # Extend frame into client area for blur to work
         class MARGINS(ctypes.Structure):
             _fields_ = [
-                ("cxLeftWidth", ctypes.c_int),
-                ("cxRightWidth", ctypes.c_int),
-                ("cyTopHeight", ctypes.c_int),
-                ("cyBottomHeight", ctypes.c_int),
+                ("cxLeftWidth", ctypes.c_int), ("cxRightWidth", ctypes.c_int),
+                ("cyTopHeight", ctypes.c_int), ("cyBottomHeight", ctypes.c_int),
             ]
         margins = MARGINS(-1, -1, -1, -1)
-        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(
-            hwnd, ctypes.byref(margins)
-        )
-
+        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
         return hr == 0
     except Exception:
         logger.debug("DWM acrylic effect not available")

@@ -5,7 +5,6 @@ from typing import Callable
 
 import os
 
-import keyboard
 from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
@@ -493,44 +492,68 @@ class SettingsWindow(QDialog):
         btn.style().unpolish(btn)
         btn.style().polish(btn)
         edit.setText(tr("settings.waiting_input"))
-        self._hotkey_hook = keyboard.hook(self._on_capture_key, suppress=False)
+        # On macOS we use Qt key events (grabKeyboard) instead of the keyboard library
+        edit.setFocus()
+        edit.grabKeyboard()
+        self._hotkey_hook = True  # flag that we're capturing
 
-    def _on_capture_key(self, event: keyboard.KeyboardEvent) -> None:
-        """Called from the keyboard library's thread."""
+    def keyPressEvent(self, event) -> None:
+        """Capture hotkey via Qt key events (macOS compatible)."""
         if not self._capturing_hotkey:
+            super().keyPressEvent(event)
             return
 
+        from PySide6.QtCore import Qt as QtKey
+        # Map Qt key to name
+        key = event.key()
+        modifiers = event.modifiers()
+
+        # Ignore pure modifier press, just track them
+        _MOD_NAMES = {
+            QtKey.Key.Key_Shift: "shift", QtKey.Key.Key_Control: "control",
+            QtKey.Key.Key_Alt: "alt", QtKey.Key.Key_Meta: "command",
+        }
+        if key in _MOD_NAMES:
+            self._captured_keys.add(_MOD_NAMES[key])
+        else:
+            # Add modifiers
+            if modifiers & QtKey.KeyboardModifier.ShiftModifier:
+                self._captured_keys.add("shift")
+            if modifiers & QtKey.KeyboardModifier.ControlModifier:
+                self._captured_keys.add("control")
+            if modifiers & QtKey.KeyboardModifier.AltModifier:
+                self._captured_keys.add("alt")
+            if modifiers & QtKey.KeyboardModifier.MetaModifier:
+                self._captured_keys.add("command")
+            # Add the actual key
+            key_name = QtKey.Key(key).name.decode() if isinstance(QtKey.Key(key).name, bytes) else QtKey.Key(key).name
+            key_name = key_name.replace("Key_", "").lower()
+            self._captured_keys.add(key_name)
+
+        edit = self._ptt_edit if self._capture_target == "ptt" else self._toggle_edit
+        display = " + ".join(
+            k.capitalize() for k in sorted(self._captured_keys)
+        )
+        edit.setText(display)
+
+    def keyReleaseEvent(self, event) -> None:
+        """Finalize hotkey capture on key release."""
+        if not self._capturing_hotkey or not self._captured_keys:
+            super().keyReleaseEvent(event)
+            return
+
+        self._capturing_hotkey = False
+        self._hotkey_hook = None
+        self.releaseKeyboard()
+
         target = self._capture_target
-        edit = self._ptt_edit if target == "ptt" else self._toggle_edit
+        keys = sorted(self._captured_keys)
+        display = " + ".join(k.capitalize() for k in keys)
 
-        if event.event_type == keyboard.KEY_DOWN:
-            self._captured_keys.add(event.name.lower())
-            display = " + ".join(
-                k.capitalize() if len(k) > 1 else k.upper()
-                for k in sorted(self._captured_keys)
-            )
-            QMetaObject.invokeMethod(
-                edit, "setText",
-                Qt.ConnectionType.QueuedConnection,
-                Q_ARG(str, display),
-            )
-
-        elif event.event_type == keyboard.KEY_UP:
-            if self._captured_keys:
-                self._capturing_hotkey = False
-                keyboard.unhook(self._hotkey_hook)
-                self._hotkey_hook = None
-
-                keys = sorted(self._captured_keys)
-                display = " + ".join(
-                    k.capitalize() if len(k) > 1 else k.upper()
-                    for k in keys
-                )
-
-                if target == "ptt":
-                    self._ptt_keys = keys
-                else:
-                    self._toggle_keys = keys
+        if target == "ptt":
+            self._ptt_keys = keys
+        else:
+            self._toggle_keys = keys
 
                 QMetaObject.invokeMethod(
                     self, "_finish_capture",
@@ -643,6 +666,6 @@ class SettingsWindow(QDialog):
 
     def closeEvent(self, event) -> None:
         if self._hotkey_hook is not None:
-            keyboard.unhook(self._hotkey_hook)
+            self.releaseKeyboard()
             self._hotkey_hook = None
         super().closeEvent(event)

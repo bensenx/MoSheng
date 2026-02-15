@@ -1,11 +1,9 @@
 """MoSheng (墨声) - Local voice input tool powered by Qwen3-ASR."""
 
 import atexit
-import fcntl
 import sys
 import os
 import logging
-import subprocess
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -14,51 +12,79 @@ from utils.logger import setup_logging
 from config import APP_NAME, APP_VERSION
 from settings_manager import SettingsManager
 
-_LOCK_FILE = os.path.expanduser("~/.mosheng/.lock")
+# ---- Platform-specific single instance & msgbox ----
 
+if sys.platform == "win32":
+    import ctypes
+    _ERROR_ALREADY_EXISTS = 183
 
-def _fatal_msgbox(msg: str, title: str = "MoSheng - Error") -> None:
-    """Show a native macOS error dialog via osascript."""
-    try:
-        escaped = msg.replace('\\', '\\\\').replace('"', '\\"')
-        subprocess.run([
-            "osascript", "-e",
-            f'display dialog "{escaped}" with title "{title}" buttons {{"OK"}} default button "OK" with icon stop',
-        ], timeout=30)
-    except Exception:
+    def _fatal_msgbox(msg: str, title: str = "MoSheng - Error") -> None:
+        ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)
+
+    def _acquire_single_instance():
+        mutex = ctypes.windll.kernel32.CreateMutexW(None, False, "MoSheng_SingleInstance")
+        if ctypes.windll.kernel32.GetLastError() == _ERROR_ALREADY_EXISTS:
+            ctypes.windll.kernel32.CloseHandle(mutex)
+            return None
+        return mutex
+
+elif sys.platform == "darwin":
+    import fcntl
+    import subprocess
+
+    _LOCK_FILE = os.path.expanduser("~/.mosheng/.lock")
+
+    def _fatal_msgbox(msg: str, title: str = "MoSheng - Error") -> None:
+        try:
+            escaped = msg.replace('\\', '\\\\').replace('"', '\\"')
+            subprocess.run([
+                "osascript", "-e",
+                f'display dialog "{escaped}" with title "{title}" buttons {{"OK"}} default button "OK" with icon stop',
+            ], timeout=30)
+        except Exception:
+            print(f"FATAL: {title}: {msg}", file=sys.stderr)
+
+    def _acquire_single_instance():
+        os.makedirs(os.path.dirname(_LOCK_FILE), exist_ok=True)
+        lock_fp = open(_LOCK_FILE, "w")
+        try:
+            fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return lock_fp
+        except OSError:
+            lock_fp.close()
+            return None
+else:
+    def _fatal_msgbox(msg: str, title: str = "MoSheng - Error") -> None:
         print(f"FATAL: {title}: {msg}", file=sys.stderr)
 
-
-def _acquire_single_instance():
-    """Try to acquire a file lock. Returns file object if acquired, None if already running."""
-    os.makedirs(os.path.dirname(_LOCK_FILE), exist_ok=True)
-    lock_fp = open(_LOCK_FILE, "w")
-    try:
-        fcntl.flock(lock_fp, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return lock_fp
-    except OSError:
-        lock_fp.close()
-        return None
+    def _acquire_single_instance():
+        return True
 
 
 def check_environment() -> bool:
     """Check GPU and audio device availability."""
     logger = logging.getLogger(__name__)
 
-    # Check MPS / CPU
     try:
         import torch
-        if torch.backends.mps.is_available():
-            logger.info("MPS (Apple Silicon GPU) is available")
-        else:
-            logger.warning("MPS is not available, will use CPU")
+        if sys.platform == "darwin":
+            if torch.backends.mps.is_available():
+                logger.info("MPS (Apple Silicon GPU) is available")
+            else:
+                logger.warning("MPS is not available, will use CPU")
+        elif sys.platform == "win32":
+            if not torch.cuda.is_available():
+                logger.warning("CUDA is not available, falling back to CPU.")
+            else:
+                gpu_name = torch.cuda.get_device_name(0)
+                vram = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                logger.info("GPU: %s (%.1f GB)", gpu_name, vram)
     except Exception as e:
         logger.error("Failed to import torch: %s", e)
         from i18n import tr
         _fatal_msgbox(tr("error.pytorch_load_failed", error=e), tr("error.title"))
         return False
 
-    # Check audio device
     try:
         import sounddevice as sd
         default_in = sd.query_devices(kind="input")
@@ -72,21 +98,24 @@ def check_environment() -> bool:
     return True
 
 
+def _get_device(settings: SettingsManager) -> str:
+    """Determine compute device from settings."""
+    device_setting = settings.get("asr", "device", default="auto")
+    if device_setting not in ("auto", "cuda:0"):
+        return device_setting
+    import torch
+    if sys.platform == "darwin":
+        return "mps" if torch.backends.mps.is_available() else "cpu"
+    else:
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
+
+
 def load_asr_engine(settings: SettingsManager):
-    """Load ASR model."""
     logger = logging.getLogger(__name__)
     from core.asr_qwen import QwenASREngine
 
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-
-    # macOS: prefer MPS, fallback to CPU
-    device_setting = settings.get("asr", "device", default="auto")
-    if device_setting in ("auto", "cuda:0"):
-        import torch
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-    else:
-        device = device_setting
-
+    device = _get_device(settings)
     dtype = settings.get("asr", "dtype", default="bfloat16")
     max_tokens = settings.get("asr", "max_new_tokens", default=256)
 
@@ -102,7 +131,6 @@ def load_asr_engine(settings: SettingsManager):
 
 
 def load_speaker_verifier(settings: SettingsManager):
-    """Load speaker verification model if enabled."""
     logger = logging.getLogger(__name__)
     from config import SPEAKER_DIR
 
@@ -113,13 +141,7 @@ def load_speaker_verifier(settings: SettingsManager):
 
     from core.speaker_verifier import SpeakerVerifier
 
-    device_setting = settings.get("asr", "device", default="auto")
-    if device_setting in ("auto", "cuda:0"):
-        import torch
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
-    else:
-        device = device_setting
-
+    device = _get_device(settings)
     verifier = SpeakerVerifier(device=device)
 
     threshold = settings.get("speaker_verification", "threshold", default=0.25)
@@ -134,9 +156,8 @@ def load_speaker_verifier(settings: SettingsManager):
 
 
 def main():
-    # Single instance check
-    lock_fp = _acquire_single_instance()
-    if lock_fp is None:
+    lock = _acquire_single_instance()
+    if lock is None:
         _fatal_msgbox("MoSheng is already running.\n\nMoSheng 已在运行中。")
         return
 
@@ -144,7 +165,6 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("%s v%s starting", APP_NAME, APP_VERSION)
 
-    # Create QApplication early so we can show splash during model loading
     from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
     from ui.styles import FLUENT_DARK_STYLESHEET
@@ -154,32 +174,29 @@ def main():
     qt_app.setQuitOnLastWindowClosed(False)
     qt_app.setStyleSheet(FLUENT_DARK_STYLESHEET)
 
-    for ext in ("icns", "png"):
+    # Icon: prefer .icns on macOS, .ico on Windows
+    icon_exts = ("icns", "png") if sys.platform == "darwin" else ("ico", "png")
+    for ext in icon_exts:
         icon_path = os.path.join(ASSETS_DIR, f"icon.{ext}")
         if os.path.isfile(icon_path):
             qt_app.setWindowIcon(QIcon(icon_path))
             break
 
-    # Initialize i18n before any UI text
     settings = SettingsManager()
     from i18n import init_language, tr
     init_language(settings)
 
-    # Show splash screen
     from ui.splash_screen import SplashScreen
     splash = SplashScreen()
     splash.show()
     qt_app.processEvents()
 
-    # Environment check
     splash.set_status("Checking environment...")
     qt_app.processEvents()
     if not check_environment():
         sys.exit(1)
 
-    # Download ASR model if not cached
     from core.model_downloader import is_model_cached, ModelDownloadThread
-
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
     if not is_model_cached(model_id):
         model_name = settings.get("asr", "model_name", default="Qwen3-ASR-1.7B")
@@ -210,20 +227,17 @@ def main():
             )
             sys.exit(1)
 
-    # Load ASR model
     splash.set_status("Loading ASR model...")
     qt_app.processEvents()
     asr_engine = load_asr_engine(settings)
     atexit.register(asr_engine.unload_model)
 
-    # Load speaker verification model (if enabled)
     splash.set_status("Loading speaker verification...")
     qt_app.processEvents()
     speaker_verifier = load_speaker_verifier(settings)
     if speaker_verifier:
         atexit.register(speaker_verifier.unload_model)
 
-    # Start the app, close splash
     from ui.app import MoShengApp
     app = MoShengApp(asr_engine=asr_engine, settings=settings,
                      speaker_verifier=speaker_verifier)

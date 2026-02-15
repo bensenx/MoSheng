@@ -8,9 +8,11 @@ dependencies = [
     "qwen-asr>=0.0.6",
     "sounddevice>=0.4.6",
     "numpy>=1.24",
-    "pyobjc-framework-Quartz>=10.0",
     "PySide6>=6.7",
     "speechbrain>=1.0",
+    "keyboard>=0.13.5; sys_platform == 'win32'",
+    "pywin32>=306; sys_platform == 'win32'",
+    "pyobjc-framework-Quartz>=10.0; sys_platform == 'darwin'",
 ]
 
 [tool.uv]

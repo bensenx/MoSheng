@@ -1,8 +1,8 @@
 """Glassmorphism dark theme: QSS stylesheet, DWM backdrop, color constants, ToggleSwitch."""
 
-import ctypes
 import logging
 import math
+import sys
 
 from PySide6.QtCore import (
     Property, QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF,
@@ -10,6 +10,9 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
 from PySide6.QtWidgets import QGroupBox, QWidget
+
+if sys.platform == "win32":
+    import ctypes
 
 logger = logging.getLogger(__name__)
 
@@ -35,29 +38,32 @@ COLOR_RECORDING = "#f38ba8"
 COLOR_RECOGNIZING = "#f9e2af"
 COLOR_RESULT = "#a6e3a1"
 COLOR_ERROR = "#f38ba8"
-COLOR_FILTERED = "#6c7086"     # Muted grey for silent filter
+COLOR_FILTERED = "#6c7086"
 COLOR_IDLE_TRAY = "#6c7086"
 
 # Overlay background
 COLOR_OVERLAY_BG = "#1a1a24"
 COLOR_OVERLAY_TEXT = "#e0e0e8"
 
-# Ink waveform overlay colors (水墨风格)
-COLOR_INK_RECORDING = "#7b8fa8"      # 淡墨蓝灰
-COLOR_INK_RECOGNIZING = "#d4a857"    # 淡金琥珀
-COLOR_INK_FILTERED = "#6c7086"       # 灰
+# Ink waveform overlay colors
+COLOR_INK_RECORDING = "#7b8fa8"
+COLOR_INK_RECOGNIZING = "#d4a857"
+COLOR_INK_FILTERED = "#6c7086"
 
-# Five-color ink palette (五色墨韵) — documentary reference, hardcoded in shader
-COLOR_INK_PINE_SOOT = "#2d3436"   # 松烟墨 (Bass)
-COLOR_INK_INDIGO = "#4a6fa5"       # 靛蓝 (Low-mid)
-COLOR_INK_OCHRE = "#b87333"        # 赭石 (Mid, center)
-COLOR_INK_CINNABAR = "#c24c40"     # 朱砂 (High-mid)
-COLOR_INK_GAMBOGE = "#d4a857"      # 藤黄 (Treble)
+# Five-color ink palette
+COLOR_INK_PINE_SOOT = "#2d3436"
+COLOR_INK_INDIGO = "#4a6fa5"
+COLOR_INK_OCHRE = "#b87333"
+COLOR_INK_CINNABAR = "#c24c40"
+COLOR_INK_GAMBOGE = "#d4a857"
 
 # ---------------------------------------------------------------------------
 # Font
 # ---------------------------------------------------------------------------
-FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif'
+if sys.platform == "darwin":
+    FONT_FAMILY = '"SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif'
+else:
+    FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif'
 
 # ---------------------------------------------------------------------------
 # Windows DWM Acrylic / Mica backdrop
@@ -69,8 +75,7 @@ def apply_acrylic_effect(hwnd: int) -> bool:
     On macOS this is a no-op — Qt's WA_TranslucentBackground handles transparency.
     The Windows DWM Acrylic path is only available on Windows.
     """
-    import sys
-    if sys.platform == "darwin":
+    if sys.platform != "win32":
         return False
     try:
         attr = 38
@@ -360,7 +365,6 @@ class ToggleSwitch(QWidget):
         self.setFixedHeight(32)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
-    # --- Qt property for animation ---
     def _get_knob_pos(self) -> float:
         return self._knob_pos
 
@@ -370,7 +374,6 @@ class ToggleSwitch(QWidget):
 
     knobPos = Property(float, _get_knob_pos, _set_knob_pos)
 
-    # --- Public API ---
     def isChecked(self) -> bool:
         return self._checked
 
@@ -381,7 +384,6 @@ class ToggleSwitch(QWidget):
         self._knob_pos = 1.0 if checked else 0.0
         self.update()
 
-    # --- Events ---
     def mousePressEvent(self, event) -> None:
         self._checked = not self._checked
         self._animation.stop()
@@ -400,12 +402,10 @@ class ToggleSwitch(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Track
         track_rect = QRect(0, (self.height() - self.TRACK_HEIGHT) // 2,
                            self.TRACK_WIDTH, self.TRACK_HEIGHT)
         track_radius = self.TRACK_HEIGHT / 2
 
-        # Smooth color transition via knob_pos
         if self._knob_pos > 0.5:
             track_color = QColor(COLOR_ACCENT)
             track_border = QColor(COLOR_ACCENT)
@@ -418,23 +418,19 @@ class ToggleSwitch(QWidget):
         p.setPen(QPen(track_border, 1))
         p.drawRoundedRect(track_rect, track_radius, track_radius)
 
-        # Knob with subtle shadow
         knob_y = self.height() // 2
         x_off = self.KNOB_MARGIN + self.KNOB_RADIUS
         x_on = self.TRACK_WIDTH - self.KNOB_MARGIN - self.KNOB_RADIUS
         knob_x = x_off + (x_on - x_off) * self._knob_pos
 
-        # Shadow
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0, 0, 0, 40))
         p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS + 1),
                        self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)
-        # Knob
         p.setBrush(QColor("#ffffff"))
         p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS),
                        self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)
 
-        # Label text
         if self._label_text:
             p.setPen(QColor(COLOR_TEXT))
             text_x = self.TRACK_WIDTH + 12
@@ -450,7 +446,6 @@ class ToggleSwitch(QWidget):
 # ---------------------------------------------------------------------------
 
 def _screen_dpr() -> float:
-    """Return the primary screen's device-pixel-ratio (at least 2 for clarity)."""
     from PySide6.QtWidgets import QApplication
     app = QApplication.instance()
     if app is not None:
@@ -461,17 +456,12 @@ def _screen_dpr() -> float:
 
 
 def load_icon_pixmap(logical_size: int) -> QPixmap | None:
-    """Load the app icon as a high-DPI QPixmap at *logical_size* px.
-
-    The icon is rendered at the screen's device-pixel-ratio and tagged so
-    Qt displays it at the correct logical size.
-    Prefers PNG (2048x2048 source) over ICO for best quality.
-    """
     import os
     from config import ASSETS_DIR
 
     dpr = _screen_dpr()
-    for ext in ("png", "ico"):
+    icon_exts = ("png", "icns") if sys.platform == "darwin" else ("png", "ico")
+    for ext in icon_exts:
         path = os.path.join(ASSETS_DIR, f"icon.{ext}")
         if os.path.isfile(path):
             physical = round(logical_size * dpr)
@@ -490,7 +480,6 @@ def load_icon_pixmap(logical_size: int) -> QPixmap | None:
 # ---------------------------------------------------------------------------
 
 def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> QPixmap:
-    """Draw a line-art icon matching screen DPR for pixel-perfect display."""
     dpr = _screen_dpr()
     ps = round(size * dpr)
     pixmap = QPixmap(ps, ps)
@@ -505,7 +494,7 @@ def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> Q
     p.setPen(pen)
     p.setBrush(Qt.BrushStyle.NoBrush)
 
-    s = float(size)  # logical size for drawing coordinates (QPainter auto-scales)
+    s = float(size)
 
     if name == "keyboard":
         p.drawRoundedRect(QRectF(1, 3, s - 2, s - 6), 2.5, 2.5)
@@ -581,19 +570,16 @@ def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> Q
         path.quadTo(s * 0.12, s * 0.62, s * 0.12, s * 0.28)
         path.closeSubpath()
         p.drawPath(path)
-        # Checkmark inside shield
         p.drawLine(QPointF(cx - s * 0.15, s * 0.50), QPointF(cx - s * 0.02, s * 0.63))
         p.drawLine(QPointF(cx - s * 0.02, s * 0.63), QPointF(cx + s * 0.18, s * 0.38))
 
     elif name == "power":
         cx = s / 2
         r = s * 0.32
-        # Arc (open at the top, ~300 degrees)
         arc_rect = QRectF(cx - r, s * 0.5 - r, r * 2, r * 2)
-        start_angle = 60 * 16   # 60 degrees from 3-o'clock (= top-right gap)
-        span_angle = 240 * 16   # 240 degrees clockwise
+        start_angle = 60 * 16
+        span_angle = 240 * 16
         p.drawArc(arc_rect.toRect(), start_angle, span_angle)
-        # Vertical line at top
         p.drawLine(QPointF(cx, s * 0.10), QPointF(cx, s * 0.45))
 
     p.end()
@@ -604,23 +590,19 @@ def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> Q
 # IconGroupBox: QGroupBox with a painted section icon
 # ---------------------------------------------------------------------------
 
-COLOR_ICON = "#8aa4ff"  # Brighter variant of accent for icons on dark backgrounds
+COLOR_ICON = "#8aa4ff"
 
 class IconGroupBox(QGroupBox):
-    """QGroupBox that draws a small icon to the left of its title text."""
-
     def __init__(self, title: str, icon_name: str, parent: QWidget | None = None):
         super().__init__(title, parent)
         self._icon_pixmap = draw_section_icon(icon_name, COLOR_ICON, 18)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        # Draw icon in the title area
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        # Position: left-aligned in the title margin area
         x = 12
-        y = -1  # align with title baseline
+        y = -1
         p.drawPixmap(x, y, self._icon_pixmap)
         p.end()

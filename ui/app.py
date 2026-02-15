@@ -2,6 +2,7 @@
 
 import logging
 import queue
+import sys
 import threading
 
 import os
@@ -174,15 +175,21 @@ class WorkerThread(QThread):
 
     @staticmethod
     def _play_beep(freq: int = 800) -> None:
-        """Play a short beep using macOS afplay or system sound."""
-        import subprocess
-        threading.Thread(
-            target=lambda: subprocess.run(
-                ["afplay", "/System/Library/Sounds/Tink.aiff"],
-                capture_output=True,
-            ),
-            daemon=True,
-        ).start()
+        """Play a short beep sound (platform-dependent)."""
+        if sys.platform == "darwin":
+            import subprocess
+            threading.Thread(
+                target=lambda: subprocess.run(
+                    ["afplay", "/System/Library/Sounds/Tink.aiff"],
+                    capture_output=True,
+                ),
+                daemon=True,
+            ).start()
+        elif sys.platform == "win32":
+            import winsound
+            threading.Thread(
+                target=lambda: winsound.Beep(freq, 100), daemon=True
+            ).start()
 
     def _handle_stop(self) -> None:
         audio = self._recorder.stop_recording()
@@ -283,12 +290,14 @@ class MoShengApp:
             on_stop=lambda: self._worker.enqueue(CMD_STOP),
         )
 
-        # (macOS: no VK suppression wiring needed)
+        # Wire hotkey VK codes to the text injector (Windows needs this)
+        if sys.platform == "win32":
+            self._injector.hotkey_vks = self._hotkey.hotkey_vks
 
-        # Application icon (loaded from assets if available)
+        # Application icon
         self._app_icon = self._load_app_icon()
 
-        # System tray — use the app icon
+        # System tray
         self._tray = QSystemTrayIcon()
         if self._app_icon:
             self._tray.setIcon(self._app_icon)
@@ -303,15 +312,11 @@ class MoShengApp:
         quit_action.triggered.connect(self._quit)
         menu.addAction(quit_action)
         self._tray.setContextMenu(menu)
-
-        # Keep a reference to prevent GC of the menu
         self._tray_menu = menu
 
-        # macOS: clicking Dock icon should open settings
-        import sys
+        # macOS: Dock integration
         if sys.platform == "darwin":
             self._tray.activated.connect(self._on_tray_activated)
-            # Re-open settings when app is re-activated from Dock
             QApplication.instance().applicationStateChanged.connect(
                 self._on_app_state_changed
             )
@@ -319,30 +324,22 @@ class MoShengApp:
         self._settings_window = None
 
     def start(self) -> None:
-        """Start background threads and show tray icon."""
         self._hotkey.start()
         self._worker.start()
         self._tray.show()
-
         logger.info("MoSheng ready (dual hotkey mode)")
 
-    # ---- Hotkey callbacks (run on hook/timer threads) ----
+    # ---- Hotkey callbacks ----
 
     def _on_hotkey_start(self) -> None:
-        """Called from hook thread when recording is triggered.
-
-        Immediately emit STATE_RECORDING so the overlay appears without
-        waiting for the worker thread to dequeue and process CMD_START.
-        """
         self._worker.state_changed.emit(STATE_RECORDING, "")
         self._worker.enqueue(CMD_START)
 
-    # ---- State handling (main thread, via signal) ----
+    # ---- State handling ----
 
     @Slot(str, str)
     def _on_state_changed(self, state: str, text: str) -> None:
         self._overlay.set_state(state, text)
-
         if state == STATE_RECORDING:
             self._tray.setToolTip(tr("tray.recording"))
         elif state == STATE_RECOGNIZING:
@@ -353,8 +350,8 @@ class MoShengApp:
     # ---- Icons ----
 
     def _load_app_icon(self) -> QIcon | None:
-        """Load main app icon from assets/ (ico or png)."""
-        for ext in ("ico", "png"):
+        exts = ("icns", "png") if sys.platform == "darwin" else ("ico", "png")
+        for ext in exts:
             path = os.path.join(ASSETS_DIR, f"icon.{ext}")
             if os.path.isfile(path):
                 icon = QIcon(path)
@@ -365,15 +362,12 @@ class MoShengApp:
     # ---- macOS Dock integration ----
 
     def _on_tray_activated(self, reason) -> None:
-        """Handle tray icon click — on macOS, open settings on trigger."""
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
             self._open_settings()
 
     def _on_app_state_changed(self, state) -> None:
-        """Handle Dock click — opens settings when app is re-activated."""
-        from PySide6.QtCore import Qt
-        if state == Qt.ApplicationState.ApplicationActive:
-            # Only open settings if no window is currently visible
+        from PySide6.QtCore import Qt as QtConst
+        if state == QtConst.ApplicationState.ApplicationActive:
             if self._settings_window is None:
                 self._open_settings()
 
@@ -396,7 +390,6 @@ class MoShengApp:
         self._settings_window.show()
 
     def _apply_settings(self) -> None:
-        # Update dual hotkey bindings
         ptt = self._settings.get("hotkey", "push_to_talk", default={})
         toggle = self._settings.get("hotkey", "toggle", default={})
         self._hotkey.update_bindings(
@@ -406,6 +399,9 @@ class MoShengApp:
             toggle_keys=toggle.get("keys", ["right ctrl"]),
             toggle_enabled=toggle.get("enabled", True),
         )
+        if sys.platform == "win32":
+            self._injector.hotkey_vks = self._hotkey.hotkey_vks
+
         self._injector.restore_clipboard = self._settings.get(
             "output", "restore_clipboard", default=True
         )
@@ -426,7 +422,6 @@ class MoShengApp:
         )
         self._worker.hotword_context = self._build_hotword_context()
 
-        # Speaker verification: lazy load/unload on toggle change
         sv_enabled = self._settings.get("speaker_verification", "enabled", default=False)
         if sv_enabled and self._speaker_verifier is None:
             self._load_speaker_verifier()
@@ -444,15 +439,13 @@ class MoShengApp:
         logger.info("Settings applied")
 
     def _migrate_hotkey_settings(self) -> None:
-        """Migrate old single-hotkey config to dual-binding format."""
         old_keys = self._settings.get("hotkey", "keys")
         if old_keys is None:
-            return  # Already new format or fresh install
+            return
 
         old_mode = self._settings.get("mode", default="push_to_talk")
         old_display = self._settings.get("hotkey", "display", default="")
 
-        # Build new structure: old binding goes to whichever mode was selected
         if old_mode == "toggle":
             ptt_cfg = {"enabled": False, "keys": ["caps lock"],
                        "display": "Caps Lock", "long_press_ms": 300}
@@ -467,31 +460,25 @@ class MoShengApp:
         self._settings.set("hotkey", "push_to_talk", ptt_cfg)
         self._settings.set("hotkey", "toggle", toggle_cfg)
 
-        # Remove old fields
         hotkey_data = self._settings.get("hotkey")
         if isinstance(hotkey_data, dict):
             hotkey_data.pop("keys", None)
             hotkey_data.pop("display", None)
-        # Remove top-level "mode"
-        all_settings = self._settings.all
-        if "mode" in all_settings:
-            # SettingsManager doesn't have a delete, so we set it via internal access
-            # We just leave it; it won't interfere with new code
-            pass
 
         self._settings.save()
-        logger.info("Migrated old hotkey config (mode=%s) to dual-binding format",
-                     old_mode)
+        logger.info("Migrated old hotkey config (mode=%s) to dual-binding format", old_mode)
 
     def _load_speaker_verifier(self) -> None:
-        """Load speaker verification model on demand (when enabled at runtime)."""
         from config import SPEAKER_DIR
         from core.speaker_verifier import SpeakerVerifier
 
         device_setting = self._settings.get("asr", "device", default="auto")
         if device_setting in ("auto", "cuda:0"):
             import torch
-            device = "mps" if torch.backends.mps.is_available() else "cpu"
+            if sys.platform == "darwin":
+                device = "mps" if torch.backends.mps.is_available() else "cpu"
+            else:
+                device = "cuda:0" if torch.cuda.is_available() else "cpu"
         else:
             device = device_setting
         verifier = SpeakerVerifier(device=device)

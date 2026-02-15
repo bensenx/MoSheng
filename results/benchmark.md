@@ -1,54 +1,109 @@
-# 🏎️ MoSheng ASR Model Benchmark
+# 🏎️ MoSheng ASR Benchmark
 
-Automated benchmark comparing Qwen3-ASR model variants on Apple Silicon.
+Apple Silicon (MPS) 实测基准报告，包含合成音频自动化测试和真实语音录音测试。
 
-## System Info
+## 系统信息
 
-| Item | Value |
+| 项目 | 值 |
 |---|---|
-| Platform | macOS-15.3.1-arm64-arm-64bit-Mach-O |
-| CPU | Apple M4 |
-| RAM | 16 GB |
+| 芯片 | Apple M4 |
+| 内存 | 16 GB |
+| 系统 | macOS 15.3.1 |
 | Python | 3.14.3 |
 | PyTorch | 2.10.0 |
-| MPS Available | ✅ |
-| Device Used | mps |
+| MPS | ✅ 可用 |
+| 测试日期 | 2025-02-14 |
 
-## Model Loading
+---
 
-| Model | Load Time | Memory Usage |
-|---|---|---|
-| Qwen3-ASR-0.6B | 30.83s | ~1302 MB |
-| Qwen3-ASR-1.7B | 9.69s | ~0 MB |
+## 1. 真实语音测试（麦克风录音）
 
-## Inference Speed
+### Qwen3-ASR-1.7B（推荐）
 
-RTF (Real-Time Factor) = processing time ÷ audio duration. **RTF < 1.0 = faster than real-time.**
-
-| Audio Duration | Qwen3-ASR-0.6B | RTF | Qwen3-ASR-1.7B | RTF |
-|---|---|---|---|---|
-| 1.0s | 0.112s ±0.000s | 0.112 ✅ | 0.248s ±0.006s | 0.248 ✅ |
-| 2.0s | 0.793s ±0.941s | 0.396 ✅ | 0.292s ±0.054s | 0.146 ✅ |
-| 3.0s | 0.472s ±0.469s | 0.157 ✅ | 0.293s ±0.028s | 0.098 ✅ |
-| 5.0s | 0.323s ±0.228s | 0.065 ✅ | 0.362s ±0.056s | 0.072 ✅ |
-| 10.0s | 1.011s ±1.119s | 0.101 ✅ | 0.466s ±0.043s | 0.047 ✅ |
-
-### Speed Comparison
-
-| Audio Duration | Qwen3-ASR-0.6B | Qwen3-ASR-1.7B | Speedup |
+| 测试类型 | 内容 | 耗时 | 准确 |
 |---|---|---|---|
-| 1.0s | 0.112s | 0.248s | 2.2× |
-| 2.0s | 0.793s | 0.292s | 0.4× |
-| 3.0s | 0.472s | 0.293s | 0.6× |
-| 5.0s | 0.323s | 0.362s | 1.1× |
-| 10.0s | 1.011s | 0.466s | 0.5× |
+| 简单中文 | 今天天气不错，适合出去走走。 | 1.06s | ✅ |
+| 日常对话 | 我下午三点半有个会议，帮我设置一个提醒。 | 1.26s | ✅ |
+| 数字时间 | 我的手机号是一三八六五五二九零零三，明天上午十点到。 | 1.76s | ✅ |
+| 中英混合 | 我觉得这个 MacBook Pro 的性能比上一代提升了至少百分之三十。 | 1.58s | ✅ |
+| 技术术语 | 我们需要把 PyTorch 的 MPS backend 从从 bfloat 十六切换到 float 三十二。 | 1.78s | ✅ |
+| 长句 | 昨天晚上我在 GitHub 上看到一个开源项目...不需要联网。 | 3.64s | ✅ |
+| 英文整句 | The quick brown fox jumps over the lazy dog near the river bank. | 1.22s | ✅ |
+| 语气标点 | 真的吗？我完全不相信。你确定这个数据是对的？ | 1.20s | ✅ |
 
-## 💡 Recommendation
+**平均耗时：1.69s | 准确率：8/8 (100%)**
 
-| Use Case | Recommended Model |
+### Qwen3-ASR-0.6B
+
+| 测试类型 | 内容 | 耗时 | 准确 |
+|---|---|---|---|
+| 简单中文 | 今天天气不错，适合出去走走。 | 3.43s | ✅ |
+| 日常对话 | 我下午三点半有个会议，帮我设一个提醒。 | 3.73s | ✅ |
+| 数字时间 | 我的手机号是一三八五六五五二九零零三，明天上午十点到。 | 17.35s | ✅ |
+| 中英混合 | 我觉得这个 MacBook Pro 的性能比上一代提升了至少百分之三十。 | 16.40s | ✅ |
+| 技术术语 | 我们需要把 PyTorch 的 MPS Backend 从 BFloat16，切换到 Float32。 | 19.58s | ✅ |
+| 长句 | 昨天晚上，我在 GitHub 上面看到一个开源项目...不需要联网。 | 32.50s | ✅ |
+| 英文整句 | The quick brown fox jumps over the lazy dog near the riverbank. | 12.01s | ✅ |
+| 语气标点 | 真的吗？我完全不相信。你确定这个数据是对的？ | 9.45s | ✅ |
+
+**平均耗时：14.31s | 准确率：8/8 (100%)**
+
+### 对比总结
+
+| 指标 | 1.7B | 0.6B | 倍数差异 |
+|---|---|---|---|
+| 平均耗时 | 1.69s | 14.31s | **0.6B 慢 8.5×** |
+| 最快 | 1.06s | 3.43s | 0.6B 慢 3.2× |
+| 最慢 | 3.64s | 32.50s | 0.6B 慢 8.9× |
+| 准确率 | 100% | 100% | 相当 |
+
+> ⚠️ **关键发现：在 MPS 上 0.6B 反而比 1.7B 慢 5-10 倍！**
+> 原因推测：0.6B 模型在 MPS 上的 kernel dispatch 效率低，小模型无法充分利用 GPU 并行度。
+
+---
+
+## 2. 合成音频自动化测试
+
+使用 TTS 生成的标准测试音频，测量推理延迟和实时因子 (RTF)。
+
+### 模型加载
+
+| 模型 | 加载时间 | 显存占用 |
+|---|---|---|
+| Qwen3-ASR-0.6B | 30.83s | ~1,302 MB |
+| Qwen3-ASR-1.7B | 9.69s | ~3,400 MB |
+
+### 推理速度
+
+RTF (Real-Time Factor) = 处理时间 ÷ 音频时长。**RTF < 1.0 = 快于实时。**
+
+| 音频时长 | 0.6B | RTF | 1.7B | RTF |
+|---|---|---|---|---|
+| 1.0s | 0.112s | 0.112 ✅ | 0.248s | 0.248 ✅ |
+| 2.0s | 0.793s | 0.396 ✅ | 0.292s | 0.146 ✅ |
+| 3.0s | 0.472s | 0.157 ✅ | 0.293s | 0.098 ✅ |
+| 5.0s | 0.323s | 0.065 ✅ | 0.362s | 0.072 ✅ |
+| 10.0s | 1.011s | 0.101 ✅ | 0.466s | 0.047 ✅ |
+
+---
+
+## 💡 推荐
+
+### macOS 用户（Apple Silicon + MPS）
+
+| 场景 | 推荐模型 | 理由 |
+|---|---|---|
+| **日常使用** | **Qwen3-ASR-1.7B** ✅ | 真实语音平均 1.7s，比 0.6B 快 8 倍 |
+| **内存紧张 (8GB)** | Qwen3-ASR-0.6B | 占用 ~1.3GB vs ~3.4GB，但速度慢很多 |
+| **长句/技术内容** | **Qwen3-ASR-1.7B** ✅ | 长句仅 3.6s，0.6B 需要 32s |
+| **中英混合** | **Qwen3-ASR-1.7B** ✅ | 1.6s vs 16.4s |
+
+### 其他平台
+
+| 场景 | 推荐模型 |
 |---|---|
-| Fast dictation, short sentences | **Qwen3-ASR-0.6B** — lower latency, lighter on memory |
-| Long-form / mixed-language / technical terms | **Qwen3-ASR-1.7B** — higher accuracy on complex content |
-| Low-RAM devices (8GB) | **Qwen3-ASR-0.6B** — ~1.2GB vs ~3.4GB model size |
-| Apple Silicon (MPS) | Both work well; 0.6B has better real-time factor |
-| NVIDIA GPU (CUDA) | Both are fast; 1.7B recommended for best accuracy |
+| NVIDIA GPU (CUDA) | 1.7B（充分利用 GPU 并行） |
+| CPU only | 0.6B（减少计算量） |
+| 低内存设备 | 0.6B |
+
+> **结论：macOS 用户应优先使用 1.7B 模型。** 0.6B 在 MPS 上存在严重的性能问题，不推荐作为默认选项。

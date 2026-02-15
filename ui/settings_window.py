@@ -564,11 +564,11 @@ class SettingsWindow(QDialog):
         else:
             self._toggle_keys = keys
 
-                QMetaObject.invokeMethod(
-                    self, "_finish_capture",
-                    Qt.ConnectionType.QueuedConnection,
-                    Q_ARG(str, target), Q_ARG(str, display),
-                )
+        QMetaObject.invokeMethod(
+            self, "_finish_capture",
+            Qt.ConnectionType.QueuedConnection,
+            Q_ARG(str, target), Q_ARG(str, display),
+        )
 
     @Slot(str, str)
     def _finish_capture(self, target: str, display: str) -> None:

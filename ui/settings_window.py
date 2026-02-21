@@ -348,11 +348,18 @@ class SettingsWindow(QDialog):
         out_layout = QHBoxLayout(out_group)
         out_layout.setSpacing(16)
 
-        self._sound_toggle = ToggleSwitch(
-            tr("settings.sound_toggle"),
-            checked=s.get("output", "sound_enabled", default=True),
-        )
-        out_layout.addWidget(self._sound_toggle)
+        out_layout.addWidget(QLabel(tr("settings.sound_style_label")))
+        self._sound_combo = QComboBox()
+        for key, i18n_key in [
+            ("bell", "settings.sound_style_bell"),
+            ("chime", "settings.sound_style_chime"),
+            ("soft", "settings.sound_style_soft"),
+            ("off", "settings.sound_style_off"),
+        ]:
+            self._sound_combo.addItem(tr(i18n_key), key)
+        self._sound_combo.setCurrentIndex(self._sound_combo.findData(
+            s.get("output", "sound_style", default="bell")))
+        out_layout.addWidget(self._sound_combo)
 
         self._overlay_toggle = ToggleSwitch(
             tr("settings.overlay_toggle"),
@@ -609,7 +616,7 @@ class SettingsWindow(QDialog):
             input_dev_id = self._input_devices[mic_idx][0] if mic_idx < len(self._input_devices) else None
             self._settings.set("audio", "input_device", input_dev_id)
 
-            self._settings.set("output", "sound_enabled", self._sound_toggle.isChecked())
+            self._settings.set("output", "sound_style", self._sound_combo.currentData())
             self._settings.set("output", "overlay_enabled", self._overlay_toggle.isChecked())
             self._settings.set("output", "restore_clipboard", self._restore_toggle.isChecked())
 

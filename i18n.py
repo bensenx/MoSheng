@@ -230,6 +230,26 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "录音开始/结束提示音",
         "en": "Play sound on record start/stop",
     },
+    "settings.sound_style_label": {
+        "zh": "提示音",
+        "en": "Notification Sound",
+    },
+    "settings.sound_style_bell": {
+        "zh": "铃声",
+        "en": "Bell",
+    },
+    "settings.sound_style_chime": {
+        "zh": "风铃",
+        "en": "Chime",
+    },
+    "settings.sound_style_soft": {
+        "zh": "轻柔",
+        "en": "Soft",
+    },
+    "settings.sound_style_off": {
+        "zh": "关闭",
+        "en": "Off",
+    },
     "settings.overlay_toggle": {
         "zh": "显示悬浮状态窗口",
         "en": "Show floating status overlay",

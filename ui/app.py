@@ -2,7 +2,6 @@
 
 import logging
 import queue
-import threading
 
 import os
 
@@ -18,6 +17,7 @@ from i18n import tr
 from settings_manager import SettingsManager
 from core.asr_base import ASRBase
 from core.audio_recorder import AudioRecorder
+from core.sound_player import SoundPlayer
 from core.text_injector import TextInjector
 from core.hotkey_manager import DualHotkeyManager
 from ui.overlay_window import (
@@ -51,6 +51,7 @@ class WorkerThread(QThread):
         self._progressive: bool = False
         self._silence_threshold: float = 0.01
         self._silence_duration: float = 0.8
+        self._sound_player = None  # Assigned by MoShengApp after construction
 
     @property
     def speaker_verifier(self):
@@ -108,11 +109,8 @@ class WorkerThread(QThread):
     def _handle_start(self) -> None:
         logger.info("Recording start (progressive=%s)", self._progressive)
         self._recorder.start_recording()
-        if self._settings.get("output", "sound_enabled", default=True):
-            import winsound
-            threading.Thread(
-                target=lambda: winsound.Beep(800, 100), daemon=True
-            ).start()
+        if self._sound_player:
+            self._sound_player.play_start()
 
         if self._progressive:
             self._run_progressive_loop()
@@ -157,11 +155,8 @@ class WorkerThread(QThread):
 
         # Final flush
         audio = self._recorder.stop_recording()
-        if self._settings.get("output", "sound_enabled", default=True):
-            import winsound
-            threading.Thread(
-                target=lambda: winsound.Beep(600, 100), daemon=True
-            ).start()
+        if self._sound_player:
+            self._sound_player.play_stop()
 
         final_ok = False
         min_dur = self._settings.get("audio", "min_duration", default=0.3)
@@ -180,11 +175,8 @@ class WorkerThread(QThread):
 
     def _handle_stop(self) -> None:
         audio = self._recorder.stop_recording()
-        if self._settings.get("output", "sound_enabled", default=True):
-            import winsound
-            threading.Thread(
-                target=lambda: winsound.Beep(600, 100), daemon=True
-            ).start()
+        if self._sound_player:
+            self._sound_player.play_stop()
 
         if not self._flush_and_inject(audio):
             self.state_changed.emit(STATE_ERROR, tr("worker.too_short"))
@@ -238,6 +230,11 @@ class MoShengApp:
 
         # Migrate old single-hotkey config to dual-binding format
         self._migrate_hotkey_settings()
+        self._migrate_sound_settings()
+
+        # Sound player
+        sound_style = self._settings.get("output", "sound_style", default="bell")
+        self._sound_player = SoundPlayer(style=sound_style)
 
         # Audio recorder
         sr = settings.get("audio", "sample_rate", default=16000)
@@ -260,6 +257,7 @@ class MoShengApp:
             self._recorder, asr_engine, self._injector, settings,
             speaker_verifier=speaker_verifier,
         )
+        self._worker._sound_player = self._sound_player
         self._worker.state_changed.connect(self._on_state_changed,
                                             Qt.ConnectionType.QueuedConnection)
         self._worker.hotword_context = self._build_hotword_context()
@@ -402,6 +400,8 @@ class MoShengApp:
         )
         self._worker.hotword_context = self._build_hotword_context()
 
+        self._sound_player.style = self._settings.get("output", "sound_style", default="bell")
+
         # Speaker verification: lazy load/unload on toggle change
         sv_enabled = self._settings.get("speaker_verification", "enabled", default=False)
         if sv_enabled and self._speaker_verifier is None:
@@ -458,6 +458,17 @@ class MoShengApp:
         self._settings.save()
         logger.info("Migrated old hotkey config (mode=%s) to dual-binding format",
                      old_mode)
+
+    def _migrate_sound_settings(self) -> None:
+        """Migrate old boolean sound_enabled to new sound_style string."""
+        old = self._settings.get("output", "sound_enabled")
+        if old is not None:
+            style = "bell" if old else "off"
+            self._settings.set("output", "sound_style", style)
+            output_settings = self._settings.get("output")
+            if isinstance(output_settings, dict):
+                output_settings.pop("sound_enabled", None)
+            self._settings.save()
 
     def _load_speaker_verifier(self) -> None:
         """Load speaker verification model on demand (when enabled at runtime)."""

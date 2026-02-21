@@ -78,7 +78,7 @@ DEFAULT_SETTINGS = {
         "input_device": None,
     },
     "output": {
-        "sound_enabled": True,
+        "sound_style": "bell",
         "overlay_enabled": True,
         "restore_clipboard": True,
     },

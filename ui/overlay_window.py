@@ -1,9 +1,9 @@
 """QML GPU shader overlay: five-color ink wash visualization (五色墨韵)."""
 
-import ctypes
 import logging
 import math
 import os
+import sys
 import time
 
 import numpy as np
@@ -24,19 +24,13 @@ STATE_RESULT = "result"
 STATE_ERROR = "error"
 STATE_FILTERED = "filtered"
 
-# Windows extended window style flags
-WS_EX_LAYERED = 0x80000
-WS_EX_TRANSPARENT = 0x20
-WS_EX_TOOLWINDOW = 0x80
-GWL_EXSTYLE = -20
-
 # State → (stateBrightness, stateHue) for shader modulation
 _STATE_VISUALS = {
-    STATE_RECORDING:   (1.0, 0.0),   # pure ink colors
-    STATE_RECOGNIZING: (1.3, 0.3),   # brighter, warm gold shift
-    STATE_RESULT:      (1.3, 0.3),   # inherit recognizing look
-    STATE_ERROR:       (0.8, 0.0),   # dimmer
-    STATE_FILTERED:    (0.7, 0.5),   # dim + grey shift
+    STATE_RECORDING:   (1.0, 0.0),
+    STATE_RECOGNIZING: (1.3, 0.3),
+    STATE_RESULT:      (1.3, 0.3),
+    STATE_ERROR:       (0.8, 0.0),
+    STATE_FILTERED:    (0.7, 0.5),
 }
 
 # QML file path (relative to this file)
@@ -44,28 +38,28 @@ _QML_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "overlay.qm
 
 # FFT constants
 _FFT_SIZE = 1024
-# Logarithmic band edges (bin indices) for 8 bands at 16kHz / 1024-point FFT
-# bin_hz ≈ 15.6 Hz/bin
-# ~0-125, 125-250, 250-500, 500-1k, 1k-2k, 2k-4k, 4k-6.4k, 6.4k-8kHz
 _BAND_EDGES = [0, 8, 16, 32, 64, 128, 256, 413, 513]
 _HANNING = np.hanning(_FFT_SIZE).astype(np.float32)
 
+# Windows click-through constants
+if sys.platform == "win32":
+    import ctypes
+    WS_EX_LAYERED = 0x80000
+    WS_EX_TRANSPARENT = 0x20
+    WS_EX_TOOLWINDOW = 0x80
+    GWL_EXSTYLE = -20
+
 
 class OverlayWindow:
-    """Bottom-center QML shader overlay for audio visualization.
-
-    Uses QQuickView with a GLSL fragment shader for GPU-rendered ink ripples.
-    Five curves with distinct ink colors respond to 5 frequency bands.
-    """
+    """Bottom-center QML shader overlay for audio visualization."""
 
     HEIGHT = 140
     WIDTH_RATIO = 0.07
     MARGIN = 32
     RESULT_DISPLAY_MS = 1500
-    FRAME_INTERVAL_MS = 33  # ~30 fps for RMS polling
+    FRAME_INTERVAL_MS = 33
 
-    def __init__(self, enabled: bool = True, recorder=None,
-                 parent=None):
+    def __init__(self, enabled: bool = True, recorder=None, parent=None):
         self._enabled = enabled
         self._recorder = recorder
         self._state = STATE_IDLE
@@ -77,7 +71,6 @@ class OverlayWindow:
         self._ready = False
         self._band_smooth = np.zeros(5, dtype=np.float32)
 
-        # Create QQuickView with transparent background
         self._view = QQuickView()
         self._view.setColor(QColor(0, 0, 0, 0))
         self._view.setResizeMode(QQuickView.ResizeMode.SizeRootObjectToView)
@@ -87,19 +80,15 @@ class OverlayWindow:
             | Qt.WindowType.Tool
         )
 
-        # Position and size
         self._update_geometry()
 
-        # Hide timer (auto-hide after result/error display)
         self._hide_timer = QTimer()
         self._hide_timer.setSingleShot(True)
         self._hide_timer.timeout.connect(self.hide)
 
-        # Frame timer for RMS polling
         self._frame_timer = QTimer()
         self._frame_timer.timeout.connect(self._on_frame)
 
-        # Opacity animation
         self._fade_anim = QPropertyAnimation(self._view, b"opacity")
         self._fade_anim.setDuration(200)
         self._fade_anim.setEasingCurve(QEasingCurve.Type.InOutQuad)
@@ -107,7 +96,6 @@ class OverlayWindow:
 
         self._view.setOpacity(0.0)
 
-        # Load QML
         logger.info("Loading QML from: %s", _QML_PATH)
         self._view.setSource(QUrl.fromLocalFile(_QML_PATH))
         if self._view.status() != QQuickView.Status.Ready:
@@ -121,7 +109,6 @@ class OverlayWindow:
             logger.error("QML root object is None, overlay disabled")
             return
 
-        # Set initial state visuals
         brightness, hue = _STATE_VISUALS[STATE_RECORDING]
         self._root.setProperty("stateBrightness", brightness)
         self._root.setProperty("stateHue", hue)
@@ -129,8 +116,6 @@ class OverlayWindow:
 
         self._ready = True
         logger.info("QML overlay ready (view size: %dx%d)", self._view.width(), self._view.height())
-
-    # --- Geometry ---
 
     def _update_geometry(self) -> None:
         screen = QApplication.primaryScreen()
@@ -146,20 +131,21 @@ class OverlayWindow:
         y = geo.bottom() - self.HEIGHT - self.MARGIN + 1
         self._view.setPosition(x, y)
 
-    # --- Click-through (Windows) ---
-
     def _set_click_through(self) -> None:
-        try:
-            hwnd = int(self._view.winId())
-            style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-            ctypes.windll.user32.SetWindowLongW(
-                hwnd, GWL_EXSTYLE,
-                style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
-            )
-        except Exception:
-            logger.debug("Could not set click-through")
-
-    # --- Opacity ---
+        if sys.platform == "win32":
+            try:
+                hwnd = int(self._view.winId())
+                style = ctypes.windll.user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+                ctypes.windll.user32.SetWindowLongW(
+                    hwnd, GWL_EXSTYLE,
+                    style | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW,
+                )
+            except Exception:
+                logger.debug("Could not set click-through")
+        elif sys.platform == "darwin":
+            # Qt.Tool + FramelessWindowHint provides most behavior on macOS.
+            # Full click-through would need NSWindow.setIgnoresMouseEvents_(True).
+            pass
 
     def _on_opacity_changed(self, value) -> None:
         self._opacity = float(value)
@@ -206,34 +192,25 @@ class OverlayWindow:
 
     @staticmethod
     def _aggregate_to_5(bands8: np.ndarray) -> np.ndarray:
-        """Aggregate 8 FFT bands into 5 for the five-color curves."""
         return np.array([
-            (bands8[0] + bands8[1]) * 0.5,   # Bass
-            (bands8[2] + bands8[3]) * 0.5,   # Low-mid
-            bands8[4],                         # Mid
-            (bands8[5] + bands8[6]) * 0.5,   # High-mid
-            bands8[7],                         # Treble
+            (bands8[0] + bands8[1]) * 0.5,
+            (bands8[2] + bands8[3]) * 0.5,
+            bands8[4],
+            (bands8[5] + bands8[6]) * 0.5,
+            bands8[7],
         ], dtype=np.float32)
 
     def _push_bands(self, bands: np.ndarray) -> None:
-        """Push 5 frequency band values to QML as individual float properties."""
         if self._root is not None:
             for i, name in enumerate(self._BAND_NAMES):
                 self._root.setProperty(name, float(bands[i]))
 
     def _zero_bands(self) -> None:
-        """Reset shader band uniforms to zero."""
         if self._root is not None:
             for name in self._BAND_NAMES:
                 self._root.setProperty(name, 0.0)
 
     def _compute_bands(self) -> np.ndarray | None:
-        """Compute 8 logarithmic frequency bands from recent audio (normalized 0-1).
-
-        Bands are normalized by peak then scaled by current RMS so that
-        quiet ambient noise produces small values while loud voice
-        produces large values.
-        """
         if self._recorder is None:
             return None
         samples = self._recorder.get_recent_samples(_FFT_SIZE)
@@ -253,28 +230,22 @@ class OverlayWindow:
         if peak > 1e-6:
             bands /= peak
 
-        # Scale by volume so quiet sounds → small, loud voice → large
         rms = self._recorder.current_rms
         vol_scale = min(rms * 50.0, 1.0)
         bands *= vol_scale
         return bands
-
-    # --- Frame tick (RMS + FFT polling) ---
 
     def _on_frame(self) -> None:
         if self._state == STATE_RECORDING and self._recorder is not None:
             raw = self._recorder.current_rms
             self._target_rms = max(min(raw * 40.0, 1.0), 0.3)
 
-            # Compute FFT bands (8) → aggregate to 5 → push to QML
             raw_bands = self._compute_bands()
             if raw_bands is not None:
                 bands5 = self._aggregate_to_5(raw_bands)
-                # Asymmetric smoothing: fast attack (0.6), slower decay (0.25)
                 alpha = np.where(bands5 > self._band_smooth, 0.6, 0.25)
                 self._band_smooth += alpha * (bands5 - self._band_smooth)
                 self._push_bands(self._band_smooth)
-                # Log once per second for diagnostic
                 if not hasattr(self, '_band_log_count'):
                     self._band_log_count = 0
                 self._band_log_count += 1
@@ -292,15 +263,11 @@ class OverlayWindow:
         else:
             self._target_rms = 0.0
 
-        # EMA smooth amplitude
         alpha = 0.35
         self._display_rms += alpha * (self._target_rms - self._display_rms)
 
-        # Push amplitude to QML
         if self._root is not None:
             self._root.setProperty("amplitude", self._display_rms)
-
-    # --- Public API ---
 
     @property
     def enabled(self) -> bool:
@@ -322,7 +289,6 @@ class OverlayWindow:
         self._hide_timer.stop()
         self._state = state
 
-        # Update state visuals (brightness + hue)
         brightness, hue = _STATE_VISUALS.get(state, _STATE_VISUALS[STATE_RECORDING])
         if self._root is not None:
             self._root.setProperty("stateBrightness", brightness)

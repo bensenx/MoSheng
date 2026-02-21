@@ -53,7 +53,9 @@ class EnrollmentDialog(QDialog):
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        import sys
+        if sys.platform != "darwin":
+            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         self._build_ui()
@@ -61,9 +63,13 @@ class EnrollmentDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        hwnd = int(self.winId())
-        if not apply_acrylic_effect(hwnd):
+        import sys
+        if sys.platform == "darwin":
             self.setStyleSheet("background-color: #141418;")
+        else:
+            hwnd = int(self.winId())
+            if not apply_acrylic_effect(hwnd):
+                self.setStyleSheet("background-color: #141418;")
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -200,7 +206,16 @@ class EnrollmentDialog(QDialog):
             try:
                 from core.speaker_verifier import SpeakerVerifier
 
-                device = self._settings.get("asr", "device", default="cuda:0")
+                import sys
+                device_setting = self._settings.get("asr", "device", default="auto")
+                if device_setting in ("auto", "cuda:0"):
+                    import torch
+                    if sys.platform == "darwin":
+                        device = "mps" if torch.backends.mps.is_available() else "cpu"
+                    else:
+                        device = "cuda:0" if torch.cuda.is_available() else "cpu"
+                else:
+                    device = device_setting
                 verifier = SpeakerVerifier(device=device)
                 verifier.load_model()
 
@@ -249,7 +264,7 @@ class EnrollmentDialog(QDialog):
 
     def _update_level(self) -> None:
         if self._recorder and self._recorder.is_recording:
-            rms = self._recorder.recent_rms()
+            rms = self._recorder.current_rms
             level = min(100, int(rms * 500))
             self._level_bar.setValue(level)
 

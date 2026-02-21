@@ -2,9 +2,10 @@
 
 import os
 import shutil
+import sys
 
 APP_NAME = "MoSheng"
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 
 # Paths
 SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".mosheng")
@@ -42,6 +43,20 @@ if not os.path.isfile(VOCABULARY_FILE):
         os.makedirs(SETTINGS_DIR, exist_ok=True)
         shutil.copy2(_default_vocab, VOCABULARY_FILE)
 
+# Platform-specific default hotkeys
+if sys.platform == "darwin":
+    _DEFAULT_PTT_KEYS = ["right command"]
+    _DEFAULT_PTT_DISPLAY = "Right Command"
+    _DEFAULT_TOGGLE_KEYS = ["fn", "f5"]
+    _DEFAULT_TOGGLE_DISPLAY = "Fn+F5"
+    _DEFAULT_DEVICE = "auto"
+else:
+    _DEFAULT_PTT_KEYS = ["caps lock"]
+    _DEFAULT_PTT_DISPLAY = "Caps Lock"
+    _DEFAULT_TOGGLE_KEYS = ["right ctrl"]
+    _DEFAULT_TOGGLE_DISPLAY = "Right Ctrl"
+    _DEFAULT_DEVICE = "auto"
+
 # Default settings
 DEFAULT_SETTINGS = {
     "language": None,
@@ -51,14 +66,14 @@ DEFAULT_SETTINGS = {
     "hotkey": {
         "push_to_talk": {
             "enabled": True,
-            "keys": ["caps lock"],
-            "display": "Caps Lock",
+            "keys": _DEFAULT_PTT_KEYS,
+            "display": _DEFAULT_PTT_DISPLAY,
             "long_press_ms": 300,
         },
         "toggle": {
             "enabled": True,
-            "keys": ["right ctrl"],
-            "display": "Right Ctrl",
+            "keys": _DEFAULT_TOGGLE_KEYS,
+            "display": _DEFAULT_TOGGLE_DISPLAY,
         },
         "progressive": False,
         "silence_threshold": 0.01,
@@ -67,7 +82,7 @@ DEFAULT_SETTINGS = {
     "asr": {
         "model_name": "Qwen3-ASR-1.7B",
         "model_id": "Qwen/Qwen3-ASR-1.7B",
-        "device": "cuda:0",
+        "device": _DEFAULT_DEVICE,
         "dtype": "bfloat16",
         "max_new_tokens": 256,
     },

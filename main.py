@@ -77,7 +77,7 @@ def check_environment() -> bool:
                 logger.warning("CUDA is not available, falling back to CPU.")
             else:
                 gpu_name = torch.cuda.get_device_name(0)
-                vram = torch.cuda.get_device_properties(0).total_mem / (1024**3)
+                vram = torch.cuda.get_device_properties(0).total_memory / (1024**3)
                 logger.info("GPU: %s (%.1f GB)", gpu_name, vram)
     except Exception as e:
         logger.error("Failed to import torch: %s", e)

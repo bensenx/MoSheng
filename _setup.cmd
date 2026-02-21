@@ -124,7 +124,7 @@ if not exist "%USERPROFILE%\.mosheng\settings.json" (
 )
 
 :: Write version marker
-> ".venv\.mosheng_version" echo 1.0.0
+> ".venv\.mosheng_version" echo 1.1.0
 >> "%LOGFILE%" echo SUCCESS: setup completed
 
 echo.

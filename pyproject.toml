@@ -1,6 +1,6 @@
 [project]
 name = "voiceinput"
-version = "1.0.0"
+version = "1.1.0"
 description = "Local voice input tool powered by Qwen3-ASR"
 requires-python = ">=3.12,<3.14"
 dependencies = [

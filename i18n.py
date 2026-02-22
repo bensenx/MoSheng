@@ -364,6 +364,20 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Enrollment failed: {error}",
     },
 
+    # -- Text processing section --
+    "settings.text_processing_section": {
+        "zh": "文本处理",
+        "en": "Text Processing",
+    },
+    "settings.remove_fillers": {
+        "zh": "去除语气词（嗯、啊、um、uh…）",
+        "en": "Remove filler words (嗯, 啊, um, uh…)",
+    },
+    "settings.smart_punctuation": {
+        "zh": "智能标点（分句自动转逗号，末句保留句号）",
+        "en": "Smart punctuation (commas between clauses, period at end)",
+    },
+
     # ---- core/speaker_verifier.py ----
     "verifier.model_not_loaded": {
         "zh": "模型未加载",

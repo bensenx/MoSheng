@@ -20,6 +20,7 @@ from core.asr_base import ASRBase
 from core.audio_recorder import AudioRecorder
 from core.sound_player import SoundPlayer
 from core.text_injector import TextInjector
+from core.text_processor import TextProcessor
 from core.hotkey_manager import DualHotkeyManager
 from ui.overlay_window import (
     OverlayWindow, STATE_RECORDING, STATE_RECOGNIZING,
@@ -48,6 +49,10 @@ class WorkerThread(QThread):
         self._settings = settings
         self._speaker_verifier = speaker_verifier
         self._cmd_queue: queue.Queue[str] = queue.Queue()
+        self._text_processor = TextProcessor(
+            remove_fillers=settings.get("text_processing", "remove_fillers", default=True),
+            smart_punctuation=settings.get("text_processing", "smart_punctuation", default=True),
+        )
         self._hotword_context: str = ""
         self._progressive: bool = False
         self._silence_threshold: float = 0.01
@@ -61,6 +66,11 @@ class WorkerThread(QThread):
     @speaker_verifier.setter
     def speaker_verifier(self, value) -> None:
         self._speaker_verifier = value
+
+    @property
+    def text_processor(self) -> TextProcessor:
+        return self._text_processor
+
 
     @property
     def hotword_context(self) -> str:
@@ -109,6 +119,7 @@ class WorkerThread(QThread):
 
     def _handle_start(self) -> None:
         logger.info("Recording start (progressive=%s)", self._progressive)
+        self._text_processor.reset_session()
         self._recorder.start_recording()
         if self._sound_player:
             self._sound_player.play_start()
@@ -166,6 +177,10 @@ class WorkerThread(QThread):
             if final_ok:
                 injected_any = True
 
+        period = self._text_processor.consume_pending_period()
+        if period and injected_any:
+            self._injector.inject_char_unicode(period)
+
         if self._settings.get("output", "restore_clipboard", default=True):
             self._injector.restore_saved_clipboard()
 
@@ -179,11 +194,12 @@ class WorkerThread(QThread):
         if self._sound_player:
             self._sound_player.play_stop()
 
-        if not self._flush_and_inject(audio):
+        if not self._flush_and_inject(audio, use_deferred_period=False):
             self.state_changed.emit(STATE_ERROR, tr("worker.too_short"))
 
     def _flush_and_inject(self, audio: np.ndarray | None,
-                          use_clipboard_restore: bool = True) -> bool:
+                          use_clipboard_restore: bool = True,
+                          use_deferred_period: bool = True) -> bool:
         """Transcribe audio and inject text. Returns True if text was injected."""
         min_duration = self._settings.get("audio", "min_duration", default=0.3)
         if audio is None or len(audio) / self._recorder.sample_rate < min_duration:
@@ -208,6 +224,8 @@ class WorkerThread(QThread):
         try:
             text = self._asr.transcribe(audio, self._recorder.sample_rate,
                                           context=self._hotword_context)
+            text = (self._text_processor.process(text) if use_deferred_period
+                    else self._text_processor.process_simple(text))
             if text.strip():
                 if use_clipboard_restore:
                     self._injector.inject_text(text)
@@ -428,6 +446,10 @@ class MoShengApp:
                 self._settings.get("speaker_verification", "high_threshold", default=0.40),
                 self._settings.get("speaker_verification", "low_threshold", default=0.10),
             )
+        self._worker.text_processor.update(
+            remove_fillers=self._settings.get("text_processing", "remove_fillers", default=True),
+            smart_punctuation=self._settings.get("text_processing", "smart_punctuation", default=True),
+        )
         logger.info("Settings applied")
 
     def _migrate_hotkey_settings(self) -> None:

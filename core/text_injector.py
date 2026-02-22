@@ -15,6 +15,7 @@ if sys.platform == "win32":
 
     INPUT_KEYBOARD = 1
     KEYEVENTF_KEYUP = 0x0002
+    KEYEVENTF_UNICODE = 0x0004
     VK_CONTROL = 0x11
     VK_V = 0x56
 
@@ -56,6 +57,14 @@ if sys.platform == "win32":
         inp = INPUT()
         inp.type = INPUT_KEYBOARD
         inp._input.ki.wVk = vk
+        inp._input.ki.dwFlags = flags
+        return inp
+
+    def _make_unicode_input(char: str, flags: int = KEYEVENTF_UNICODE) -> INPUT:
+        inp = INPUT()
+        inp.type = INPUT_KEYBOARD
+        inp._input.ki.wVk = 0
+        inp._input.ki.wScan = ord(char)
         inp._input.ki.dwFlags = flags
         return inp
 
@@ -128,6 +137,18 @@ class TextInjector:
         if self._saved_clipboard is not None:
             threading.Timer(0.3, self._set_clipboard, args=(self._saved_clipboard,)).start()
             self._saved_clipboard = None
+
+    def inject_char_unicode(self, char: str) -> None:
+        """Type a single Unicode character via SendInput (no clipboard, zero latency)."""
+        try:
+            _send_inputs(
+                _make_unicode_input(char),
+                _make_unicode_input(char, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP),
+            )
+            time.sleep(0.02)
+            logger.info("inject_char_unicode: %r", char)
+        except Exception:
+            logger.warning("inject_char_unicode failed for char %r", char)
 
     def inject_text_no_restore(self, text: str) -> None:
         if not text.strip():

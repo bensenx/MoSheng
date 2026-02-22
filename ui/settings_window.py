@@ -428,6 +428,23 @@ class SettingsWindow(QDialog):
 
         content_layout.addWidget(vocab_group)
 
+        # --- Text Processing Section ---
+        tp_group = IconGroupBox(tr("settings.text_processing_section"), "gear")
+        tp_layout = QHBoxLayout(tp_group)
+        tp_layout.setSpacing(16)
+        self._remove_fillers_toggle = ToggleSwitch(
+            tr("settings.remove_fillers"),
+            checked=s.get("text_processing", "remove_fillers", default=True),
+        )
+        tp_layout.addWidget(self._remove_fillers_toggle)
+        self._smart_punct_toggle = ToggleSwitch(
+            tr("settings.smart_punctuation"),
+            checked=s.get("text_processing", "smart_punctuation", default=True),
+        )
+        tp_layout.addWidget(self._smart_punct_toggle)
+        tp_layout.addStretch()
+        main_layout.addWidget(tp_group)
+
         # --- Buttons ---
         main_layout.addSpacing(8)
         btn_layout = QHBoxLayout()
@@ -682,6 +699,9 @@ class SettingsWindow(QDialog):
             self._settings.set("vocabulary", "enabled", self._vocab_toggle.isChecked())
 
             self._settings.set("speaker_verification", "enabled", self._sv_toggle.isChecked())
+
+            self._settings.set("text_processing", "remove_fillers", self._remove_fillers_toggle.isChecked())
+            self._settings.set("text_processing", "smart_punctuation", self._smart_punct_toggle.isChecked())
 
             # Autostart (writes registry directly)
             set_autostart(self._autostart_toggle.isChecked())

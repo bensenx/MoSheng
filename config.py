@@ -106,6 +106,10 @@ DEFAULT_SETTINGS = {
         "high_threshold": 0.40,
         "low_threshold": 0.10,
     },
+    "text_processing": {
+        "remove_fillers": True,
+        "smart_punctuation": True,
+    },
 }
 
 # Available ASR models

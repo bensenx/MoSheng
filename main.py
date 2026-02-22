@@ -228,8 +228,10 @@ def main():
             sys.exit(1)
 
     splash.set_status("Loading ASR model...")
+    splash.set_hint(tr("splash.loading_asr_hint"))
     qt_app.processEvents()
     asr_engine = load_asr_engine(settings)
+    splash.set_hint("")
     atexit.register(asr_engine.unload_model)
 
     splash.set_status("Loading speaker verification...")

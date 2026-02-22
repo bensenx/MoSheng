@@ -41,6 +41,10 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "正在下载模型... {percent}%",
         "en": "Downloading model... {percent}%",
     },
+    "splash.loading_asr_hint": {
+        "zh": "首次加载或更换设备可能需要几分钟，请耐心等待",
+        "en": "First load or device change may take a few minutes, please wait",
+    },
 
     # ---- ui/app.py (WorkerThread) ----
     "worker.no_content": {
@@ -202,8 +206,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Enable Speaker Verification",
     },
     "settings.speaker_hint": {
-        "zh": "注册声纹后，将自动过滤其他人的语音输入",
-        "en": "After enrollment, voice input from others will be filtered",
+        "zh": "注册声纹后，将自动过滤其他人的语音输入。注意：极短的词语（不足 1 秒）可能因音频太短而被误过滤",
+        "en": "After enrollment, voice input from others will be filtered. Note: Very short words (<1s) may be incorrectly filtered due to insufficient audio for verification",
     },
     "settings.enroll_voice": {
         "zh": "录制声纹",

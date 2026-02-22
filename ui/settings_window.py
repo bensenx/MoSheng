@@ -443,7 +443,7 @@ class SettingsWindow(QDialog):
         )
         tp_layout.addWidget(self._smart_punct_toggle)
         tp_layout.addStretch()
-        main_layout.addWidget(tp_group)
+        content_layout.addWidget(tp_group)
 
         # --- Buttons ---
         main_layout.addSpacing(8)

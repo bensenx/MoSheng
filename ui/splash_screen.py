@@ -87,6 +87,16 @@ class SplashScreen(QWidget):
             f"color: {COLOR_TEXT_SECONDARY}; background: transparent;"
         )
         root.addWidget(self._status_label)
+
+        # Hint text (shown only during slow operations)
+        self._hint_label = QLabel("", self)
+        self._hint_label.setFont(QFont("Segoe UI Variable", 10))
+        self._hint_label.setStyleSheet(
+            f"color: {COLOR_TEXT_SECONDARY}; background: transparent; opacity: 0.6;"
+        )
+        self._hint_label.setWordWrap(True)
+        self._hint_label.hide()
+        root.addWidget(self._hint_label)
         root.addStretch()
 
         # Accent bar at bottom
@@ -162,6 +172,14 @@ class SplashScreen(QWidget):
         else:
             self._status_base = ""
             self._status_label.setText(text)
+
+    def set_hint(self, text: str) -> None:
+        """Show or hide a secondary hint line below the status."""
+        if text:
+            self._hint_label.setText(text)
+            self._hint_label.show()
+        else:
+            self._hint_label.hide()
 
     def show(self) -> None:
         """Show immediately at full opacity (no fade-in)."""

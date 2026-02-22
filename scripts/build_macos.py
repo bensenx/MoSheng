@@ -18,7 +18,7 @@ CONTENTS = os.path.join(APP_DIR, "Contents")
 MACOS_DIR = os.path.join(CONTENTS, "MacOS")
 RESOURCES_DIR = os.path.join(CONTENTS, "Resources")
 APP_RESOURCES = os.path.join(RESOURCES_DIR, "app")
-DMG_NAME = "MoSheng-v1.1.0-macOS.dmg"
+DMG_NAME = "MoSheng-v1.1.1-macOS.dmg"
 
 SRC_FILES = [
     "main.py",
@@ -78,8 +78,8 @@ def create_info_plist():
         "CFBundleName": "MoSheng",
         "CFBundleDisplayName": "MoSheng 墨声",
         "CFBundleIdentifier": "com.mosheng.app",
-        "CFBundleVersion": "1.1.0",
-        "CFBundleShortVersionString": "1.1.0",
+        "CFBundleVersion": "1.1.1",
+        "CFBundleShortVersionString": "1.1.1",
         "CFBundlePackageType": "APPL",
         "CFBundleExecutable": "mosheng",
         "CFBundleIconFile": "icon",

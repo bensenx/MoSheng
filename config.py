@@ -5,7 +5,7 @@ import shutil
 import sys
 
 APP_NAME = "MoSheng"
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 
 # Paths
 SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".mosheng")

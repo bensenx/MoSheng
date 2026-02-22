@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.2.0 (2026-02-21)
+
+### Features
+
+- **Text Processing** — new post-processing pipeline applied after ASR transcription
+  - Remove filler words: Chinese (嗯/呃/哦/唔/那个/然后/就是…) and English (um/uh/hmm/er…)
+  - Smart punctuation: in progressive mode, intermediate pauses become commas; final period injected at session end, producing flowing prose
+  - Toggle each option independently in Settings → Text Processing
+- **Unicode character injection** — new `inject_char_unicode()` method for zero-latency single-character input via SendInput
+
+### Fixes
+
+- Fix Text Processing settings section rendered outside scroll area (stuck at bottom of settings window)
+- Splash screen now shows "First load may take a few minutes" hint during ASR model loading, explaining the expected wait on new machines
+- Speaker verification hint now warns that very short words (<1s) may be incorrectly filtered
+
 ## v1.1.0-macos (2026-02-14)
 
 ### 🍎 macOS 支持

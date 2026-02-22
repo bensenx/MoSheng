@@ -35,6 +35,7 @@ Powered by [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B). **Runs 100% 
 
 - 🎤 **Dual Hotkeys** — Push-to-talk / toggle mode with customizable keys
 - ⚡ **Progressive Input** — auto-injects text on speech pauses, no need to wait until you finish
+- ✂️ **Text Processing** — removes filler words (嗯/呃/um/uh…) and converts pauses to commas in progressive mode
 - 🔒 **Speaker Verification** — SpeechBrain ECAPA-TDNN two-stage verification, responds only to your voice
 - 🔄 **Multiple Models** — Qwen3-ASR-1.7B (accurate) / 0.6B (lightweight), switch in settings
 - 📖 **Custom Vocabulary** — import CSV/TXT word lists to boost recognition of domain terms
@@ -145,9 +146,20 @@ Hotkeys are fully customizable. PTT mode has a 300 ms long-press threshold to pr
 
 When enabled, text is automatically injected after a silence of 0.8 seconds — no need to wait until you finish speaking. Great for long paragraphs.
 
+### Text Processing
+
+Two optional post-processing steps applied after transcription:
+
+- **Remove filler words** — strips common hesitation words: Chinese (嗯、呃、哦、那个、然后…) and English (um, uh, hmm, er…)
+- **Smart punctuation** — in progressive mode, intermediate pauses become commas instead of periods; the final period is injected only at the end, producing flowing prose rather than choppy sentences
+
+Both can be toggled independently in Settings → **Text Processing**.
+
 ### Speaker Verification
 
 When enabled, only your registered voice is recognized. Go to Settings → **Enroll Voice** and record 3 audio segments.
+
+> **Note:** Very short words (<1 second) may be incorrectly filtered when speaker verification is enabled, as there is insufficient audio for confident speaker identification.
 
 ### Custom Vocabulary
 

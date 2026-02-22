@@ -1,6 +1,9 @@
 """Synthesized audio feedback for recording start/stop events."""
+import logging
 import numpy as np
 import sounddevice as sd
+
+logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 44100
 
@@ -112,5 +115,5 @@ class SoundPlayer:
         try:
             audio = self._sounds[self._style][event]
             sd.play(audio, samplerate=SAMPLE_RATE, blocking=False)
-        except Exception:
-            pass  # Never crash the worker due to audio issues
+        except Exception as e:
+            logger.debug("Sound playback failed: %s", e)

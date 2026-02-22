@@ -563,7 +563,7 @@ class SettingsWindow(QDialog):
             if modifiers & QtKey.KeyboardModifier.MetaModifier:
                 self._captured_keys.add("command")
             # Add the actual key
-            key_name = QtKey.Key(key).name.decode() if isinstance(QtKey.Key(key).name, bytes) else QtKey.Key(key).name
+            key_name = QtKey.Key(key).name
             key_name = key_name.replace("Key_", "").lower()
             self._captured_keys.add(key_name)
 

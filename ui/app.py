@@ -39,6 +39,9 @@ class WorkerThread(QThread):
 
     state_changed = Signal(str, str)  # (state, text)
 
+    _MIN_SPEECH_BEFORE_FLUSH = 0.5   # seconds of speech required before allowing flush
+    _MAX_SILENCE_FORCE_FLUSH = 3.0   # seconds of continuous silence to force-flush
+
     def __init__(self, recorder: AudioRecorder, asr: ASRBase,
                  injector: TextInjector, settings: SettingsManager,
                  speaker_verifier=None):
@@ -135,7 +138,7 @@ class WorkerThread(QThread):
             self._injector.save_clipboard()
 
         silence_start: float | None = None
-        had_speech = False
+        speech_start: float | None = None
         injected_any = False
 
         while True:
@@ -151,18 +154,31 @@ class WorkerThread(QThread):
 
             rms = self._recorder.current_rms
             if rms < self._silence_threshold:
-                if had_speech and silence_start is None:
+                if speech_start is not None and silence_start is None:
                     silence_start = time.monotonic()
-                elif (had_speech and silence_start is not None
-                      and time.monotonic() - silence_start >= self._silence_duration):
-                    audio = self._recorder.drain_buffer()
-                    if self._flush_and_inject(audio, use_clipboard_restore=False):
-                        injected_any = True
-                    self.state_changed.emit(STATE_RECORDING, "")
-                    silence_start = None
-                    had_speech = False
+                elif speech_start is not None and silence_start is not None:
+                    silence_elapsed = time.monotonic() - silence_start
+                    speech_duration = silence_start - speech_start
+                    if (silence_elapsed >= self._silence_duration
+                            and speech_duration >= self._MIN_SPEECH_BEFORE_FLUSH):
+                        # Enough speech accumulated — flush normally
+                        audio = self._recorder.drain_buffer()
+                        if self._flush_and_inject(audio, use_clipboard_restore=False):
+                            injected_any = True
+                        self.state_changed.emit(STATE_RECORDING, "")
+                        silence_start = None
+                        speech_start = None
+                    elif silence_elapsed >= self._MAX_SILENCE_FORCE_FLUSH:
+                        # Safety valve: long silence after insufficient speech
+                        audio = self._recorder.drain_buffer()
+                        if self._flush_and_inject(audio, use_clipboard_restore=False):
+                            injected_any = True
+                        self.state_changed.emit(STATE_RECORDING, "")
+                        silence_start = None
+                        speech_start = None
             else:
-                had_speech = True
+                if speech_start is None:
+                    speech_start = time.monotonic()
                 silence_start = None
 
         # Final flush
@@ -226,6 +242,14 @@ class WorkerThread(QThread):
                                           context=self._hotword_context)
             text = (self._text_processor.process(text) if use_deferred_period
                     else self._text_processor.process_simple(text))
+
+            # Quality filter: reject single-char garbage from short audio
+            audio_duration = len(audio) / self._recorder.sample_rate
+            if (self._text_processor.meaningful_length(text) <= 1
+                    and audio_duration < 1.0):
+                logger.debug("Quality filter: rejected '%s' (%.2fs audio)", text, audio_duration)
+                return False
+
             if text.strip():
                 if use_clipboard_restore:
                     self._injector.inject_text(text)

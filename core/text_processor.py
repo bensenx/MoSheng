@@ -147,6 +147,11 @@ class TextProcessor:
         self._pending_period = ""
         return p
 
+    @staticmethod
+    def meaningful_length(text: str) -> int:
+        """Count non-punctuation, non-whitespace characters."""
+        return sum(1 for ch in text if ch not in ' \t\n\r，。！？；：、,.!?;:')
+
     def process_simple(self, text: str) -> str:
         """Process without deferred-period logic. For PTT mode where each recording is standalone."""
         return process_text(text, self._remove_fillers, self._smart_punctuation)

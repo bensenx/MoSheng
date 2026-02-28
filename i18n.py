@@ -162,10 +162,6 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "渐进式输入（停顿时自动输入已识别文本）",
         "en": "Progressive input (auto-type on pause)",
     },
-    "settings.silence_threshold": {
-        "zh": "静音阈值",
-        "en": "Silence Threshold",
-    },
     "settings.silence_duration": {
         "zh": "静音时长(秒)",
         "en": "Silence Duration (s)",

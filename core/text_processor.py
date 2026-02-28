@@ -154,7 +154,14 @@ class TextProcessor:
 
     def process_simple(self, text: str) -> str:
         """Process without deferred-period logic. For PTT mode where each recording is standalone."""
-        return process_text(text, self._remove_fillers, self._smart_punctuation)
+        result = process_text(text, self._remove_fillers, self._smart_punctuation)
+        # Short outputs are likely corrections, not full sentences — strip trailing period
+        if result and self.meaningful_length(result) <= 4:
+            if result.endswith('。'):
+                result = result[:-1]
+            elif result.endswith('.'):
+                result = result[:-1]
+        return result
 
     def process(self, text: str) -> str:
         """Process text with current settings, applying deferred-period logic."""
@@ -181,6 +188,10 @@ class TextProcessor:
         # Treat as pure filler: don't update pending period
         if not result:
             return ""
+
+        # Short outputs (≤4 meaningful chars) are likely corrections — suppress period
+        if self.meaningful_length(result) <= 4:
+            new_pending = ""
 
         # Prepend comma from previous segment's deferred period (if any)
         if self._pending_period and result:

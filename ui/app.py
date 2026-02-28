@@ -58,8 +58,8 @@ class WorkerThread(QThread):
         )
         self._hotword_context: str = ""
         self._progressive: bool = False
-        self._silence_threshold: float = 0.01
         self._silence_duration: float = 0.8
+        self._vad = None  # SileroVAD instance, set by MoShengApp
         self._sound_player = None  # Assigned by MoShengApp after construction
 
     @property
@@ -92,14 +92,6 @@ class WorkerThread(QThread):
         self._progressive = value
 
     @property
-    def silence_threshold(self) -> float:
-        return self._silence_threshold
-
-    @silence_threshold.setter
-    def silence_threshold(self, value: float) -> None:
-        self._silence_threshold = value
-
-    @property
     def silence_duration(self) -> float:
         return self._silence_duration
 
@@ -128,6 +120,8 @@ class WorkerThread(QThread):
             self._sound_player.play_start()
 
         if self._progressive:
+            if self._vad is not None:
+                self._vad.reset_states()
             self._run_progressive_loop()
 
     def _run_progressive_loop(self) -> None:
@@ -140,6 +134,7 @@ class WorkerThread(QThread):
         silence_start: float | None = None
         speech_start: float | None = None
         injected_any = False
+        vad_leftover = np.array([], dtype=np.float32)
 
         while True:
             try:
@@ -152,8 +147,25 @@ class WorkerThread(QThread):
             except queue.Empty:
                 pass
 
-            rms = self._recorder.current_rms
-            if rms < self._silence_threshold:
+            # Determine speech/silence via VAD (or fallback to RMS)
+            is_speech = False
+            if self._vad is not None:
+                new_samples = self._recorder.get_new_samples()
+                if new_samples is not None:
+                    combined = np.concatenate([vad_leftover, new_samples])
+                    chunk_size = self._vad.chunk_size
+                    pos = 0
+                    while pos + chunk_size <= len(combined):
+                        chunk = combined[pos:pos + chunk_size]
+                        if self._vad.is_speech(chunk):
+                            is_speech = True
+                        pos += chunk_size
+                    vad_leftover = combined[pos:]
+            else:
+                # Fallback: RMS-based (should not happen with VAD loaded)
+                is_speech = self._recorder.current_rms >= 0.01
+
+            if not is_speech:
                 if speech_start is not None and silence_start is None:
                     silence_start = time.monotonic()
                 elif speech_start is not None and silence_start is not None:
@@ -161,21 +173,21 @@ class WorkerThread(QThread):
                     speech_duration = silence_start - speech_start
                     if (silence_elapsed >= self._silence_duration
                             and speech_duration >= self._MIN_SPEECH_BEFORE_FLUSH):
-                        # Enough speech accumulated — flush normally
                         audio = self._recorder.drain_buffer()
                         if self._flush_and_inject(audio, use_clipboard_restore=False):
                             injected_any = True
                         self.state_changed.emit(STATE_RECORDING, "")
                         silence_start = None
                         speech_start = None
+                        vad_leftover = np.array([], dtype=np.float32)
                     elif silence_elapsed >= self._MAX_SILENCE_FORCE_FLUSH:
-                        # Safety valve: long silence after insufficient speech
                         audio = self._recorder.drain_buffer()
                         if self._flush_and_inject(audio, use_clipboard_restore=False):
                             injected_any = True
                         self.state_changed.emit(STATE_RECORDING, "")
                         silence_start = None
                         speech_start = None
+                        vad_leftover = np.array([], dtype=np.float32)
             else:
                 if speech_start is None:
                     speech_start = time.monotonic()
@@ -305,8 +317,12 @@ class MoShengApp:
                                             Qt.ConnectionType.QueuedConnection)
         self._worker.hotword_context = self._build_hotword_context()
         self._worker.progressive = settings.get("hotkey", "progressive", default=False)
-        self._worker.silence_threshold = settings.get("hotkey", "silence_threshold", default=0.01)
         self._worker.silence_duration = settings.get("hotkey", "silence_duration", default=0.8)
+
+        # Load VAD for progressive mode
+        self._vad = None
+        if self._worker.progressive:
+            self._load_vad()
 
         # Dual hotkey manager
         ptt = settings.get("hotkey", "push_to_talk", default={})
@@ -447,15 +463,20 @@ class MoShengApp:
         self._recorder.device = self._settings.get(
             "audio", "input_device", default=None
         )
-        self._worker.progressive = self._settings.get(
-            "hotkey", "progressive", default=False
-        )
-        self._worker.silence_threshold = self._settings.get(
-            "hotkey", "silence_threshold", default=0.01
-        )
+        progressive = self._settings.get("hotkey", "progressive", default=False)
+        self._worker.progressive = progressive
         self._worker.silence_duration = self._settings.get(
             "hotkey", "silence_duration", default=0.8
         )
+
+        # Load/unload VAD on progressive toggle
+        if progressive and self._vad is None:
+            self._load_vad()
+        elif not progressive and self._vad is not None:
+            self._vad.unload()
+            self._vad = None
+            self._worker._vad = None
+            logger.info("VAD unloaded (progressive disabled)")
         self._worker.hotword_context = self._build_hotword_context()
 
         self._sound_player.style = self._settings.get("output", "sound_style", default="bell")
@@ -521,6 +542,13 @@ class MoShengApp:
             if isinstance(output_settings, dict):
                 output_settings.pop("sound_enabled", None)
             self._settings.save()
+
+    def _load_vad(self) -> None:
+        from core.vad import SileroVAD
+        vad = SileroVAD()
+        vad.load_model()
+        self._vad = vad
+        self._worker._vad = vad
 
     def _load_speaker_verifier(self) -> None:
         from config import SPEAKER_DIR

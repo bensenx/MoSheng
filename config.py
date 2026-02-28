@@ -76,7 +76,6 @@ DEFAULT_SETTINGS = {
             "display": _DEFAULT_TOGGLE_DISPLAY,
         },
         "progressive": False,
-        "silence_threshold": 0.01,
         "silence_duration": 0.8,
     },
     "asr": {

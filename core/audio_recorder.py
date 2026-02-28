@@ -25,6 +25,8 @@ class AudioRecorder:
         # Ring buffer for FFT: keeps last 2048 samples (~128ms @ 16kHz)
         self._recent = np.zeros(2048, dtype=np.float32)
         self._recent_pos: int = 0
+        # VAD read position: tracks how much of _buffer has been consumed by VAD
+        self._vad_pos: int = 0
 
     @property
     def is_recording(self) -> bool:
@@ -37,6 +39,7 @@ class AudioRecorder:
             self._buffer.clear()
             self._smoothed_rms = 0.0
             self._current_rms = 0.0
+            self._vad_pos = 0
             self._recording = True
 
         self._stream = sd.InputStream(
@@ -77,6 +80,7 @@ class AudioRecorder:
                 return None
             audio = np.concatenate(self._buffer, axis=0).flatten()
             self._buffer.clear()
+            self._vad_pos = 0
         duration = len(audio) / self._sample_rate
         logger.info("Buffer drained: %.2fs, %d samples", duration, len(audio))
         return audio
@@ -125,6 +129,24 @@ class AudioRecorder:
             return buf[pos - n_samples:pos].copy()
         else:
             return np.concatenate([buf[-(n_samples - pos):], buf[:pos]]).copy()
+
+    def get_new_samples(self) -> np.ndarray | None:
+        """Return unprocessed audio samples since last call (for VAD).
+
+        Returns None if no new samples are available.
+        """
+        with self._lock:
+            if not self._buffer:
+                return None
+            total = sum(b.shape[0] for b in self._buffer)
+            if total <= self._vad_pos:
+                return None
+            audio = np.concatenate(self._buffer, axis=0).flatten()
+            new = audio[self._vad_pos:]
+            self._vad_pos = len(audio)
+        if len(new) == 0:
+            return None
+        return new
 
     @property
     def current_rms(self) -> float:

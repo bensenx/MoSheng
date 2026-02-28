@@ -212,6 +212,21 @@ Produces `dist/MoSheng.app`. To create DMG:
 hdiutil create -volname MoSheng -srcfolder dist/MoSheng.app -ov -format UDZO dist/MoSheng.dmg
 ```
 
+## Changelog
+
+### v1.3.0
+
+- **Silero VAD** — replaced RMS-based silence detection with [Silero VAD](https://github.com/snakers4/silero-vad) neural network for progressive input. No more per-mic threshold tuning; keyboard noise no longer triggers false positives.
+- **Short sentence period suppression** — single words or short corrections (≤4 meaningful chars) no longer get a trailing period forced on them.
+- **Simplified settings** — removed the silence threshold spinner (VAD handles it automatically). Only silence duration remains configurable.
+
+### v1.2.0
+
+- **Dual hotkey mode** — push-to-talk and toggle bindings can coexist, each independently configurable.
+- **Progressive input** — auto-inject transcribed text on speech pauses without waiting until you finish.
+- **Text processing** — filler word removal (嗯/呃/um/uh…) and smart punctuation (commas between clauses, period at end).
+- **Hook auto-reinstall** — periodic reinstall of keyboard hook to prevent Windows from silently removing it.
+
 ## Project Structure
 
 ```
@@ -222,6 +237,7 @@ settings_manager.py      Settings persistence
 core/
   asr_qwen.py            Qwen3-ASR engine
   audio_recorder.py      Audio recording (sounddevice)
+  vad.py                 Silero VAD wrapper (voice activity detection)
   speaker_verifier.py    Speaker verification (SpeechBrain)
   text_injector.py       Text injection (Ctrl+V / Cmd+V)
   hotkey_manager.py      Hotkey management (Win32 / CGEventTap)
@@ -398,6 +414,21 @@ curl -fsSL https://raw.githubusercontent.com/bensenx/MoSheng/macos/scripts/insta
 ### 自定义词汇表
 
 在 `~/.mosheng/vocabulary.csv` 中添加专业术语，每行一个，帮助提高识别率。
+
+## 更新日志
+
+### v1.3.0
+
+- **Silero VAD 语音活动检测** — 渐进式输入的静音检测从 RMS 阈值替换为 [Silero VAD](https://github.com/snakers4/silero-vad) 神经网络。无需针对不同麦克风调阈值，键盘打字不再误触发。
+- **短句句号抑制** — 单词或简短修正（≤4 个有效字符）不再被强加句号。
+- **简化设置** — 移除了静音阈值滑块（VAD 自动处理），仅保留静音时长设置。
+
+### v1.2.0
+
+- **双快捷键模式** — 按住录音和按键切换可同时启用，各自独立配置。
+- **渐进式输入** — 说话停顿时自动注入已识别文本，无需等待说完。
+- **文本处理** — 去除语气词（嗯/呃/um/uh…）和智能标点（分句转逗号，末尾加句号）。
+- **钩子自动重装** — 定期重装键盘钩子，防止 Windows 静默移除。
 
 ---
 

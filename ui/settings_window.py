@@ -254,16 +254,6 @@ class SettingsWindow(QDialog):
         prog_layout.setContentsMargins(24, 0, 0, 0)
         prog_layout.setSpacing(16)
 
-        prog_layout.addWidget(QLabel(tr("settings.silence_threshold")))
-        self._threshold_spin = QDoubleSpinBox()
-        self._threshold_spin.setRange(0.005, 0.200)
-        self._threshold_spin.setSingleStep(0.005)
-        self._threshold_spin.setDecimals(3)
-        self._threshold_spin.setValue(
-            s.get("hotkey", "silence_threshold", default=0.01)
-        )
-        prog_layout.addWidget(self._threshold_spin)
-
         prog_layout.addWidget(QLabel(tr("settings.silence_duration")))
         self._duration_spin = QDoubleSpinBox()
         self._duration_spin.setRange(0.3, 3.0)
@@ -676,7 +666,6 @@ class SettingsWindow(QDialog):
             })
 
             self._settings.set("hotkey", "progressive", self._progressive_toggle.isChecked())
-            self._settings.set("hotkey", "silence_threshold", self._threshold_spin.value())
             self._settings.set("hotkey", "silence_duration", self._duration_spin.value())
 
             # ASR model

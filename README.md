@@ -101,7 +101,7 @@ uv run python main.py
 
 #### Option A: DMG Install (Recommended)
 
-1. Download `MoSheng-v1.1.0-macOS.dmg` from [Releases](https://github.com/bensenx/MoSheng/releases/tag/v1.1.0-macos)
+1. Download `MoSheng-vX.X.X-macOS.dmg` from [Releases](https://github.com/bensenx/MoSheng/releases)
 2. Open the DMG and drag **MoSheng** to **Applications**
 3. **First launch:** Right-click MoSheng.app → **Open** → click **Open** (Gatekeeper one-time prompt)
 4. Grant **Accessibility** permission when prompted (System Settings → Privacy & Security → Accessibility)
@@ -119,14 +119,7 @@ uv run python main.py
 ```bash
 git clone https://github.com/bensenx/MoSheng.git
 cd MoSheng
-git checkout macos
 uv run python main.py
-```
-
-#### Option C: Install Script
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bensenx/MoSheng/macos/scripts/install_macos.sh | bash
 ```
 
 ## Configuration
@@ -344,7 +337,7 @@ uv run python main.py
 
 #### 方式 A：DMG 安装（推荐）
 
-1. 从 [Releases](https://github.com/bensenx/MoSheng/releases/tag/v1.1.0-macos) 下载 `MoSheng-v1.1.0-macOS.dmg`
+1. 从 [Releases](https://github.com/bensenx/MoSheng/releases) 下载最新的 `MoSheng-vX.X.X-macOS.dmg`
 2. 打开 DMG，将 **MoSheng** 拖入 **Applications（应用程序）**
 3. **首次启动：** 右键点击 MoSheng.app → **打开** → 点击 **打开**（Gatekeeper 一次性提示）
 4. 授权**辅助功能**权限（系统设置 → 隐私与安全性 → 辅助功能）
@@ -361,14 +354,8 @@ uv run python main.py
 
 ```bash
 git clone https://github.com/bensenx/MoSheng.git
-cd MoSheng && git checkout macos
+cd MoSheng
 uv run python main.py
-```
-
-#### 方式 C：安装脚本
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/bensenx/MoSheng/macos/scripts/install_macos.sh | bash
 ```
 
 ## 性能测试

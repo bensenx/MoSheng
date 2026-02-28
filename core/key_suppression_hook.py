@@ -22,6 +22,7 @@ if sys.platform == "win32":
     WM_SYSKEYDOWN = 0x0104
     WM_SYSKEYUP = 0x0105
     WM_QUIT = 0x0012
+    WM_APP_REINSTALL_HOOK = 0x8001
     LLKHF_INJECTED = 0x00000010
     LLKHF_LOWER_IL_INJECTED = 0x00000002
     HC_ACTION = 0
@@ -69,6 +70,13 @@ if sys.platform == "win32":
                 self._thread.join(timeout=5.0)
                 self._thread = None
             self._thread_id = None
+
+        def reinstall(self) -> None:
+            """Post a message to the hook thread to reinstall the hook."""
+            if self._thread_id is not None:
+                ctypes.windll.user32.PostThreadMessageW(
+                    self._thread_id, WM_APP_REINSTALL_HOOK, 0, 0,
+                )
 
         def _run(self) -> None:
             user32 = ctypes.WinDLL("user32", use_last_error=True)
@@ -130,6 +138,18 @@ if sys.platform == "win32":
 
             msg = ctypes.wintypes.MSG()
             while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                if msg.message == WM_APP_REINSTALL_HOOK:
+                    if self._hook_handle:
+                        user32.UnhookWindowsHookEx(self._hook_handle)
+                    self._hook_handle = user32.SetWindowsHookExW(
+                        WH_KEYBOARD_LL, self._c_callback, h_module, 0,
+                    )
+                    if self._hook_handle:
+                        logger.debug("Keyboard hook reinstalled")
+                    else:
+                        logger.error("Failed to reinstall keyboard hook (error %d)",
+                                     ctypes.get_last_error())
+                    continue
                 user32.TranslateMessage(ctypes.byref(msg))
                 user32.DispatchMessageW(ctypes.byref(msg))
 

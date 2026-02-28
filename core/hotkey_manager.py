@@ -220,6 +220,11 @@ class DualHotkeyManager:
             self._active_mode = None
         logger.info("DualHotkeyManager stopped")
 
+    def reinstall_hook(self) -> None:
+        """Reinstall the keyboard hook to recover from silent removal by Windows."""
+        if sys.platform == "win32" and self._hook is not None:
+            self._hook.reinstall()
+
     @property
     def is_active(self) -> bool:
         return self._is_active

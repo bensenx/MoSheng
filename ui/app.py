@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 
-from PySide6.QtCore import QThread, Signal, Slot, Qt
+from PySide6.QtCore import QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -330,6 +330,11 @@ class MoShengApp:
 
         self._settings_window = None
 
+        # Periodic hook reinstall to recover from silent removal by Windows
+        self._hook_health_timer = QTimer()
+        self._hook_health_timer.timeout.connect(self._reinstall_hook)
+        self._hook_health_timer.start(60_000)
+
     def start(self) -> None:
         self._hotkey.start()
         self._worker.start()
@@ -528,6 +533,11 @@ class MoShengApp:
         if not words:
             return ""
         return ", ".join(words)
+
+    # ---- Hook health ----
+
+    def _reinstall_hook(self) -> None:
+        self._hotkey.reinstall_hook()
 
     # ---- Shutdown ----
 

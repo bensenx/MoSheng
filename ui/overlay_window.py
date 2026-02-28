@@ -284,6 +284,8 @@ class OverlayWindow:
 
     def set_state(self, state: str, text: str = "") -> None:
         if not self._enabled or not self._ready:
+            logger.debug("Overlay set_state(%s) skipped: enabled=%s, ready=%s",
+                         state, self._enabled, self._ready)
             return
 
         self._hide_timer.stop()

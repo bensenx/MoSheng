@@ -33,7 +33,8 @@ assets/
 core/
   asr_base.py           ASR 抽象基类 (ABC)，可替换模型
   asr_qwen.py           Qwen3-ASR-1.7B 实现（含音频诊断日志）
-  audio_recorder.py     sounddevice 录音，16kHz 单声道 float32，支持指定设备，drain_buffer + EMA RMS
+  audio_recorder.py     sounddevice 录音，16kHz 单声道 float32，支持指定设备，drain_buffer + EMA RMS + VAD feed
+  vad.py                Silero VAD V5 封装：torch.hub 加载，CPU 推理，512 样本/chunk，语音活动概率检测
   speaker_verifier.py   声纹识别：SpeechBrain ECAPA-TDNN 两级验证（快速路径/慢速分段）
   text_injector.py      剪贴板写入 + ctypes SendInput 模拟 Ctrl+V，hotkey-aware 修饰键释放
   hotkey_manager.py     WH_KEYBOARD_LL 钩子级按键抑制 + VK 码分组匹配，支持 push_to_talk / toggle
@@ -62,7 +63,7 @@ scripts/
 
 | 分类 | 项目 | 运行时热更新 |
 |------|------|:---:|
-| 快捷键 | 按键组合、录音模式（按住/切换）、渐进式输入、静音阈值/时长 | ✓ |
+| 快捷键 | 按键组合、录音模式（按住/切换）、渐进式输入、静音时长 | ✓ |
 | 语言 | 界面语言（中文/English） | ✗ 需重启 |
 | 语音识别 | ASR 模型、GPU 设备 | ✗ 需重启 |
 | 音频输入 | 麦克风设备选择 | ✓ |
@@ -101,7 +102,7 @@ uv run python scripts/build_dist.py
 
 - **主线程**: `QApplication.exec()` 事件循环，拥有所有 QWidget 和 QSystemTrayIcon
 - **KeySuppressionHook 线程**: WH_KEYBOARD_LL 钩子 + 消息泵，VK 码分组匹配触发 start/stop → 写入 worker cmd_queue
-- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→声纹验证→识别→粘贴流程，通过 `state_changed` 信号更新 UI；渐进模式下 50ms 轮询 RMS 检测停顿
+- **WorkerThread (QThread)**: 从 cmd_queue 读命令，驱动录音→声纹验证→识别→粘贴流程，通过 `state_changed` 信号更新 UI；渐进模式下 50ms 轮询 Silero VAD 检测停顿
 - **PortAudio 回调线程**: 音频帧写入 buffer
 
 ## 编码注意事项
@@ -149,11 +150,14 @@ uv run python scripts/build_dist.py
 - KEY_UP 事件可能因窗口焦点切换丢失
 
 ### 渐进式输入 (progressive input)
-- WorkerThread 在 `_handle_start()` 末尾进入 `_run_progressive_loop()`，50ms 轮询 cmd_queue + EMA 平滑 RMS
+- WorkerThread 在 `_handle_start()` 末尾进入 `_run_progressive_loop()`，50ms 轮询 cmd_queue + Silero VAD 检测语音活动
+- VAD 通过 `AudioRecorder.get_new_samples()` 获取增量音频，按 512 样本分 chunk 调用 `vad.is_speech()`，不足 512 的尾部在 `vad_leftover` 中跨迭代传递
+- `_handle_start()` 调用 `vad.reset_states()` 清除 LSTM 状态；`drain_buffer()` 后清空 `vad_leftover`
 - 语音→静音转换后等待 `silence_duration`（默认 0.8s），然后 `drain_buffer()` + `_flush_and_inject()`
 - 每个分段都经过声纹验证（如已启用）和词汇表上下文
 - 剪贴板在循环开始前 `save_clipboard()`，每段用 `inject_text_no_restore()`，循环结束后一次性 `restore_saved_clipboard()`
 - 最终 flush 失败时：若之前有成功注入则发 STATE_IDLE（清除 overlay），否则发 STATE_ERROR
+- MoShengApp 在渐进模式启用时懒加载 VAD（`_load_vad()`），禁用时卸载
 
 ### 音频录制
 - `sounddevice.InputStream(device=N)` 指定输入设备，`None` 为系统默认

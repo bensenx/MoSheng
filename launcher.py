@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 
-CURRENT_VERSION = "1.2.0"
+CURRENT_VERSION = "1.3.0"
 
 
 def get_app_dir() -> str:

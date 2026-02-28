@@ -177,6 +177,11 @@ class TextProcessor:
             result = result[:-1]
             new_pending = '.'
 
+        # Period-only remnant (e.g. "嗯。" → filler removed → "。" → stripped → "")
+        # Treat as pure filler: don't update pending period
+        if not result:
+            return ""
+
         # Prepend comma from previous segment's deferred period (if any)
         if self._pending_period and result:
             result = '，' + result

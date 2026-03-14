@@ -8,6 +8,12 @@ import logging
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# pythonw.exe sets stdout/stderr to None — redirect to devnull to prevent crashes
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w")
+
 from utils.logger import setup_logging
 from config import APP_NAME, APP_VERSION
 from settings_manager import SettingsManager

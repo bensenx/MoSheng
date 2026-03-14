@@ -20,13 +20,15 @@ def setup_logging(level=logging.INFO):
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setFormatter(formatter)
 
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-
     root = logging.getLogger()
     root.setLevel(level)
     root.addHandler(file_handler)
-    root.addHandler(console_handler)
+
+    # Skip console handler when stdout is unavailable (pythonw.exe)
+    if sys.stdout is not None and hasattr(sys.stdout, "write"):
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        root.addHandler(console_handler)
 
     # Quiet noisy libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)

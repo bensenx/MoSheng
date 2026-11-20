@@ -1,6 +1,8 @@
 """Application coordinator: QSystemTrayIcon + worker thread + component wiring."""
 
+from dataclasses import dataclass, field
 import logging
+import threading
 import queue
 import sys
 
@@ -35,6 +37,15 @@ CMD_STOP = "stop"
 CMD_QUIT = "quit"
 
 
+@dataclass(eq=False)
+class Recording:
+    progressive: bool
+    restore_clipboard: bool
+    verifier: object | None
+    # A final chunk can be empty. A bare None cancels an unfinished capture.
+    chunks: queue.Queue[tuple[np.ndarray | None, bool] | None] = field(default_factory=queue.Queue)
+
+
 class WorkerThread(QThread):
     """Processes recording/ASR commands from a queue, emits state signals."""
 
@@ -53,7 +64,11 @@ class WorkerThread(QThread):
         self._settings = settings
         self._speaker_verifier = speaker_verifier
         self.verifier_error = ""
+        self._recordings: queue.Queue[Recording | None] = queue.Queue()
+        self._capture: Recording | None = None
+        self._latest_recording: Recording | None = None
         self._cmd_queue: queue.Queue[str] = queue.Queue()
+        self._shutting_down = threading.Event()
         self._text_processor = TextProcessor(
             remove_fillers=settings.get("text_processing", "remove_fillers", default=True),
             smart_punctuation=settings.get("text_processing", "smart_punctuation", default=True),
@@ -104,6 +119,10 @@ class WorkerThread(QThread):
     def enqueue(self, cmd: str) -> None:
         self._cmd_queue.put(cmd)
 
+    def shutdown(self) -> None:
+        self._shutting_down.set()
+        self.enqueue(CMD_QUIT)
+
     def readiness_issue(self) -> tuple[str, str] | None:
         if self._asr is None or not self._asr.is_ready:
             return STATE_LOADING, tr("tray.loading")
@@ -118,28 +137,36 @@ class WorkerThread(QThread):
         return None
 
     def run(self) -> None:
-        while True:
-            cmd = self._cmd_queue.get()
-            if cmd == CMD_QUIT:
-                if self._recorder.is_recording:
-                    try:
-                        self._recorder.stop_recording()
-                    except Exception:
-                        logger.exception("Could not close the microphone on exit")
-                break
-            try:
-                if cmd == CMD_START and not self._recorder.is_recording:
-                    self._handle_start()
-                elif cmd == CMD_STOP and self._recorder.is_recording:
-                    self._handle_stop()
-            except Exception:
-                logger.exception("Recording session failed")
+        decoder = threading.Thread(target=self._decode_recordings, name="DictationDecoder")
+        decoder.start()
+        try:
+            while True:
+                cmd = self._cmd_queue.get()
+                if cmd == CMD_QUIT:
+                    break
                 try:
-                    if self._recorder.is_recording:
-                        self._recorder.stop_recording()
+                    if cmd == CMD_START and self._capture is None:
+                        self._handle_start()
+                    elif cmd == CMD_STOP and self._capture is not None:
+                        self._handle_stop()
                 except Exception:
-                    logger.exception("Could not close the input stream")
-                self.state_changed.emit(STATE_ERROR, tr("worker.recording_failed"))
+                    logger.exception("Recording session failed")
+                    self._cancel_capture()
+                    self.state_changed.emit(STATE_ERROR, tr("worker.recording_failed"))
+        finally:
+            self._cancel_capture()
+            self._recordings.put(None)
+            decoder.join()
+
+    def _cancel_capture(self) -> None:
+        if self._capture is not None:
+            self._capture.chunks.put(None)
+            self._capture = None
+        if self._recorder.is_recording:
+            try:
+                self._recorder.stop_recording()
+            except Exception:
+                logger.exception("Could not close microphone")
 
     def _handle_start(self) -> None:
         issue = self.readiness_issue()
@@ -147,42 +174,37 @@ class WorkerThread(QThread):
             self.state_changed.emit(*issue)
             return
         logger.info("Recording start (progressive=%s)", self._progressive)
-        self._text_processor.reset_session()
         self._recorder.start_recording()
+        session = Recording(
+            progressive=self._progressive,
+            restore_clipboard=self._settings.get("output", "restore_clipboard", default=True),
+            verifier=self._speaker_verifier if self._settings.get("speaker_verification", "enabled", default=False) else None,
+        )
+        self._capture = self._latest_recording = session
+        self._recordings.put(session)
         self.state_changed.emit(STATE_RECORDING, "")
         if self._sound_player:
             self._sound_player.play_start()
 
-        if self._progressive:
-            if self._vad is not None:
-                self._vad.reset_states()
-            self._run_progressive_loop()
+        if session.progressive:
+            vad = self._vad
+            if vad is not None:
+                vad.reset_states()
+            self._process_progressive_audio(session, vad)
 
-    def _run_progressive_loop(self) -> None:
-        """Monitor for speech pauses and transcribe incrementally."""
-        restore_clipboard = self._settings.get("output", "restore_clipboard", default=True)
-        if restore_clipboard:
-            self._injector.save_clipboard()
-        try:
-            self._process_progressive_audio()
-        finally:
-            if restore_clipboard:
-                self._injector.restore_saved_clipboard()
-
-    def _process_progressive_audio(self) -> None:
+    def _process_progressive_audio(self, session: Recording, vad) -> None:
         import time
 
         silence_start: float | None = None
         speech_start: float | None = None
-        injected_any = False
-        last_outcome = None
         vad_leftover = np.array([], dtype=np.float32)
 
         while True:
             try:
                 cmd = self._cmd_queue.get(timeout=0.05)
                 if cmd == CMD_STOP:
-                    break
+                    self._handle_stop()
+                    return
                 elif cmd == CMD_QUIT:
                     self._cmd_queue.put(CMD_QUIT)
                     return
@@ -191,15 +213,15 @@ class WorkerThread(QThread):
 
             # Determine speech/silence via VAD (or fallback to RMS)
             is_speech = False
-            if self._vad is not None:
+            if vad is not None:
                 new_samples = self._recorder.get_new_samples()
                 if new_samples is not None:
                     combined = np.concatenate([vad_leftover, new_samples])
-                    chunk_size = self._vad.chunk_size
+                    chunk_size = vad.chunk_size
                     pos = 0
                     while pos + chunk_size <= len(combined):
                         chunk = combined[pos:pos + chunk_size]
-                        if self._vad.is_speech(chunk):
+                        if vad.is_speech(chunk):
                             is_speech = True
                         pos += chunk_size
                     vad_leftover = combined[pos:]
@@ -217,12 +239,7 @@ class WorkerThread(QThread):
                              and speech_duration >= self._MIN_SPEECH_BEFORE_FLUSH)
                     if pause or silence_elapsed >= self._MAX_SILENCE_FORCE_FLUSH:
                         audio = self._recorder.drain_buffer()
-                        last_outcome = self._flush_and_inject(audio, use_clipboard_restore=False)
-                        if last_outcome[0] == STATE_RESULT:
-                            injected_any = True
-                            self.state_changed.emit(STATE_RECORDING, "")
-                        else:
-                            self.state_changed.emit(*last_outcome)
+                        session.chunks.put((audio, False))
                         silence_start = None
                         speech_start = None
                         vad_leftover = np.array([], dtype=np.float32)
@@ -231,35 +248,70 @@ class WorkerThread(QThread):
                     speech_start = time.monotonic()
                 silence_start = None
 
-        # Final flush
-        audio = self._recorder.stop_recording()
-        if self._sound_player:
-            self._sound_player.play_stop()
-
-        min_dur = self._settings.get("audio", "min_duration", default=0.3)
-        if audio is not None and len(audio) / self._recorder.sample_rate >= min_dur:
-            outcome = self._flush_and_inject(audio, use_clipboard_restore=False)
-            injected_any |= outcome[0] == STATE_RESULT
-            self.state_changed.emit(*outcome)
-        elif last_outcome is None:
-            self.state_changed.emit(STATE_ERROR, tr("worker.no_content"))
-        elif last_outcome[0] == STATE_RESULT:
-            self.state_changed.emit(STATE_IDLE, "")
-
-        period = self._text_processor.consume_pending_period()
-        if period and injected_any:
-            self._injector.inject_char_unicode(period)
-
     def _handle_stop(self) -> None:
         audio = self._recorder.stop_recording()
+        session, self._capture = self._capture, None
+        if audio is not None:
+            self.state_changed.emit(STATE_RECOGNIZING, "")
+        session.chunks.put((audio, True))
         if self._sound_player:
             self._sound_player.play_stop()
 
-        self.state_changed.emit(*self._flush_and_inject(audio, use_deferred_period=False))
+    def _decode_recordings(self) -> None:
+        while (session := self._recordings.get()) is not None:
+            try:
+                self._decode_session(session)
+            except Exception:
+                logger.exception("Could not process dictation")
+                self._emit_for_session(session, STATE_ERROR, tr("worker.recognition_failed"))
+            finally:
+                # The UI keeps the latest recording for status. Release its model.
+                session.verifier = None
+
+    def _emit_for_session(self, session: Recording | None, state: str, text: str) -> None:
+        if session is None or session is self._latest_recording:
+            self.state_changed.emit(state, text)
+
+    def _decode_session(self, session: Recording) -> None:
+        self._text_processor.reset_session()
+        restore = session.progressive and session.restore_clipboard
+        if restore:
+            self._injector.save_clipboard()
+        injected_any = False
+        last_outcome = None
+        try:
+            while (chunk := session.chunks.get()) is not None:
+                audio, final = chunk
+                if self._shutting_down.is_set():
+                    return
+                minimum = self._settings.get("audio", "min_duration", default=0.3)
+                if session.progressive and final and (audio is None or len(audio) < minimum * self._recorder.sample_rate):
+                    if last_outcome is None:
+                        self._emit_for_session(session, STATE_ERROR, tr("worker.no_content"))
+                    elif last_outcome[0] == STATE_RESULT:
+                        self._emit_for_session(session, STATE_IDLE, "")
+                else:
+                    last_outcome = self._flush_and_inject(audio, use_clipboard_restore=not session.progressive,
+                                                          use_deferred_period=session.progressive, session=session)
+                    if last_outcome[0] == STATE_RESULT:
+                        injected_any = True
+                    if not final and last_outcome[0] == STATE_RESULT and self._recorder.is_recording:
+                        self._emit_for_session(session, STATE_RECORDING, "")
+                    else:
+                        self._emit_for_session(session, *last_outcome)
+                if final:
+                    if session.progressive and injected_any:
+                        period = self._text_processor.consume_pending_period()
+                        if period and not self._shutting_down.is_set():
+                            self._injector.inject_char_unicode(period)
+                    return
+        finally:
+            if restore:
+                self._injector.restore_saved_clipboard()
 
     def _flush_and_inject(self, audio: np.ndarray | None,
                           use_clipboard_restore: bool = True,
-                          use_deferred_period: bool = True) -> tuple[str, str]:
+                          use_deferred_period: bool = True, session: Recording | None = None) -> tuple[str, str]:
         """Return one terminal state and its message for this segment."""
         min_duration = self._settings.get("audio", "min_duration", default=0.3)
         if audio is None or len(audio) / self._recorder.sample_rate < min_duration:
@@ -268,10 +320,13 @@ class WorkerThread(QThread):
         issue = self.readiness_issue()
         if issue:
             return issue
-        verified_by = None
+        verified_by = session.verifier if session is not None else None
         if self._settings.get("speaker_verification", "enabled", default=False):
+            verified_by = self._speaker_verifier
+            if verified_by is None:
+                return STATE_ERROR, tr("worker.verification_failed")
+        if verified_by is not None:
             try:
-                verified_by = self._speaker_verifier
                 result = verified_by.verify(audio, self._recorder.sample_rate)
                 if not result.is_user:
                     logger.info("Speaker filtered: path=%s, score=%.4f", result.path, result.score)
@@ -282,7 +337,8 @@ class WorkerThread(QThread):
                 logger.exception("Speaker verification failed")
                 return STATE_ERROR, tr("worker.verification_failed")
 
-        self.state_changed.emit(STATE_RECOGNIZING, "")
+        if session is not None and session is self._capture and session.progressive:
+            self._emit_for_session(session, STATE_RECOGNIZING, "")
 
         try:
             text = self._asr.transcribe(audio, self._recorder.sample_rate,
@@ -300,6 +356,8 @@ class WorkerThread(QThread):
         except Exception:
             logger.exception("Transcription failed")
             return STATE_ERROR, tr("worker.recognition_failed")
+        if self._shutting_down.is_set():
+            return STATE_IDLE, ""
         if not text.strip():
             return STATE_ERROR, tr("worker.no_content")
         # A settings change during inference can enable or replace the verifier.
@@ -577,7 +635,7 @@ class MoShengApp(QObject):
         if progressive and self._vad is None:
             self._load_vad()
         elif not progressive and self._vad is not None:
-            self._vad.unload()
+            # An active capture keeps its own reference until it stops.
             self._vad = None
             self._worker._vad = None
             logger.info("VAD unloaded (progressive disabled)")
@@ -710,7 +768,7 @@ class MoShengApp(QObject):
     def _shutdown(self) -> None:
         logger.info("Shutting down...")
         self._hotkey.stop()
-        self._worker.enqueue(CMD_QUIT)
+        self._worker.shutdown()
         self._worker.wait()
         if self._verifier_loader is not None:
             self._verifier_loader.wait()

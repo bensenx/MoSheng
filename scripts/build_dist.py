@@ -16,6 +16,7 @@ DIST_DIR = os.path.join(ROOT, "dist", "MoSheng")
 
 # Source files and directories to include in the distribution
 SRC_FILES = [
+    "app_version.py",
     "main.py",
     "config.py",
     "settings_manager.py",

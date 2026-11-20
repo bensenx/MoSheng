@@ -3,9 +3,9 @@
 import os
 import shutil
 import sys
+from app_version import APP_VERSION
 
 APP_NAME = "MoSheng"
-APP_VERSION = "1.3.0"
 
 # Paths
 SETTINGS_DIR = os.path.join(os.path.expanduser("~"), ".mosheng")

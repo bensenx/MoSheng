@@ -384,7 +384,7 @@ class DualHotkeyManager:
                 self._ptt_press_time = None
                 self._ptt_long_triggered = False
                 if self._on_stop:
-                    threading.Thread(target=self._on_stop, daemon=True).start()
+                    self._on_stop()
                 return True
 
             if was_all_pressed and self._ptt_press_time is not None:
@@ -411,8 +411,8 @@ class DualHotkeyManager:
             self._is_active = True
             self._active_mode = "ptt"
             logger.info("PTT long-press triggered")
-        if self._on_start:
-            self._on_start()
+            if self._on_start:
+                self._on_start()
 
     def _cancel_ptt_timer(self) -> None:
         if self._ptt_timer is not None:
@@ -428,12 +428,12 @@ class DualHotkeyManager:
                     self._is_active = True
                     self._active_mode = "toggle"
                     if self._on_start:
-                        threading.Thread(target=self._on_start, daemon=True).start()
+                        self._on_start()
                 else:
                     self._is_active = False
                     self._active_mode = None
                     if self._on_stop:
-                        threading.Thread(target=self._on_stop, daemon=True).start()
+                        self._on_stop()
                 return True
             return self._is_active and self._active_mode == "toggle"
         else:

@@ -94,7 +94,7 @@ def check_environment() -> bool:
     return True
 
 
-def load_asr_engine(settings: SettingsManager):
+def load_asr_engine(settings: SettingsManager, snapshot):
     logger = logging.getLogger(__name__)
     from core.asr_qwen import QwenASREngine
 
@@ -104,7 +104,7 @@ def load_asr_engine(settings: SettingsManager):
     max_tokens = settings.get("asr", "max_new_tokens", default=256)
 
     engine = QwenASREngine(
-        model_id=model_id, device=device,
+        model_id=str(snapshot), device=device,
         dtype=dtype, max_new_tokens=max_tokens,
     )
 
@@ -153,33 +153,30 @@ def main():
     logger.info("[startup] splash_visible")
 
     # ---- One-time model download (kept on main thread; has its own progress UI) ----
-    from core.model_downloader import is_model_cached, ModelDownloadThread
+    from core.model_downloader import cached_snapshot, ModelDownloadThread
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-    if not is_model_cached(model_id):
+    snapshot = cached_snapshot(model_id)
+    if snapshot is None:
         model_name = settings.get("asr", "model_name", default="Qwen3-ASR-1.7B")
         splash.set_status(tr("splash.downloading_model", name=model_name))
         qt_app.processEvents()
 
         download_thread = ModelDownloadThread(model_id)
-        download_error = []
 
         def _on_download_progress(pct):
             splash.set_status(tr("splash.download_progress", percent=pct))
 
-        def _on_download_error(msg):
-            download_error.append(msg)
-
         download_thread.progress.connect(_on_download_progress)
-        download_thread.error.connect(_on_download_error)
         download_thread.start()
 
         while download_thread.isRunning():
             qt_app.processEvents()
             download_thread.wait(100)
 
-        if download_error:
+        snapshot = download_thread.snapshot
+        if snapshot is None:
             _fatal_msgbox(
-                tr("error.model_download_failed", error=download_error[0]),
+                tr("error.model_download_failed", error=download_thread.failure),
                 tr("error.title"),
             )
             sys.exit(1)
@@ -213,7 +210,7 @@ def main():
                     return
 
                 self.stage.emit(tr("tray.loading"))
-                engine = load_asr_engine(self._settings)
+                engine = load_asr_engine(self._settings, snapshot)
                 self.stage.emit(tr("splash.warming"))
                 engine.warmup()
                 self.asr_ready.emit(engine)

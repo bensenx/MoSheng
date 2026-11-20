@@ -21,6 +21,7 @@ APP_RESOURCES = os.path.join(RESOURCES_DIR, "app")
 DMG_NAME = "MoSheng-v1.3.0-macOS.dmg"
 
 SRC_FILES = [
+    "app_version.py",
     "main.py",
     "config.py",
     "settings_manager.py",

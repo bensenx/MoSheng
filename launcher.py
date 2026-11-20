@@ -8,7 +8,7 @@ import os
 import subprocess
 import sys
 
-CURRENT_VERSION = "1.3.0"
+from app_version import APP_VERSION as CURRENT_VERSION
 
 
 def get_app_dir() -> str:
@@ -59,12 +59,11 @@ if sys.platform == "win32":
         version_marker = os.path.join(app_dir, ".venv", ".mosheng_version")
         if not os.path.isfile(venv_pythonw):
             return True
-        if not os.path.isfile(version_marker):
+        try:
+            with open(version_marker, encoding="utf-8") as f:
+                return f.read().strip() != CURRENT_VERSION
+        except (OSError, UnicodeError):
             return True
-        with open(version_marker, encoding="utf-8") as f:
-            if f.read().strip() != CURRENT_VERSION:
-                return True
-        return False
 
     def run_setup(app_dir: str) -> bool:
         setup_script = os.path.join(app_dir, "_setup.cmd")
@@ -73,15 +72,16 @@ if sys.platform == "win32":
             return False
 
         wrapper = os.path.join(app_dir, "_run_setup.cmd")
-        with open(wrapper, "w", encoding="ascii") as f:
+        with open(wrapper, "w", encoding="ascii", newline="") as f:
             f.write("@echo off\r\n")
             f.write('call "%~dp0_setup.cmd"\r\n')
-            f.write("if errorlevel 1 (\r\n")
+            f.write('set "setup_status=%errorlevel%"\r\n')
+            f.write('if not "%setup_status%"=="0" (\r\n')
             f.write("    echo.\r\n")
             f.write("    echo Setup failed. Press any key to close...\r\n")
             f.write("    pause >nul\r\n")
             f.write(")\r\n")
-            f.write("exit\r\n")
+            f.write("exit /b %setup_status%\r\n")
 
         try:
             ret = subprocess.call(
@@ -122,7 +122,6 @@ def main() -> None:
         load_mirror_env(app_dir)
         if needs_setup(app_dir):
             if not run_setup(app_dir):
-                fatal_msgbox("依赖安装失败，请检查网络连接后重试。")
                 return
             load_mirror_env(app_dir)
         pythonw = os.path.join(app_dir, ".venv", "Scripts", "pythonw.exe")

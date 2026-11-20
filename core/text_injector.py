@@ -10,6 +10,7 @@ logger = logging.getLogger(__name__)
 if sys.platform == "win32":
     import ctypes
     import ctypes.wintypes
+    from uuid import uuid4
     import win32clipboard
     import win32con
 
@@ -114,6 +115,10 @@ class TextInjector:
     def __init__(self, restore_clipboard: bool = True):
         self._restore_clipboard = restore_clipboard
         self._saved_clipboard: str | None = None
+        self._owner_format: int | None = None
+        self._pending_restore: tuple[bytes, str] | None = None
+        self._progressive_restore = False
+        self._session_restore: tuple[bytes, str] | None = None
         self._hotkey_vks: frozenset[int] = frozenset()
 
     @property
@@ -133,9 +138,20 @@ class TextInjector:
         self._hotkey_vks = value
 
     def save_clipboard(self) -> None:
+        if sys.platform == "win32":
+            # Capture the original atomically with the first write. The user
+            # can copy something between starting dictation and the first paste.
+            self._progressive_restore = True
+            self._session_restore = None
+            return
         self._saved_clipboard = self._get_clipboard()
 
     def restore_saved_clipboard(self) -> None:
+        if sys.platform == "win32":
+            self._schedule_restore(self._session_restore, 0.3)
+            self._progressive_restore = False
+            self._session_restore = None
+            return
         if self._saved_clipboard is not None:
             threading.Timer(0.3, self._set_clipboard, args=(self._saved_clipboard,)).start()
             self._saved_clipboard = None
@@ -156,8 +172,10 @@ class TextInjector:
         if not text.strip():
             logger.info("Empty text, skipping injection")
             return
-        if not self._set_clipboard(text):
+        if not self._set_clipboard(text, preserve=self._progressive_restore):
             raise RuntimeError("Could not write transcription to the clipboard")
+        if self._progressive_restore:
+            self._session_restore = self._pending_restore
         time.sleep(0.05)
         _send_paste(hotkey_vks=self._hotkey_vks)
         logger.info("Injected text (no restore): %s", text[:80])
@@ -166,30 +184,22 @@ class TextInjector:
         if not text.strip():
             logger.info("Empty text, skipping injection")
             return
-        old_clipboard = self._get_clipboard() if self._restore_clipboard else None
-        if not self._set_clipboard(text):
+        restore = self._restore_clipboard
+        old_clipboard = self._get_clipboard() if restore and sys.platform != "win32" else None
+        if not self._set_clipboard(text, preserve=restore):
             raise RuntimeError("Could not write transcription to the clipboard")
         try:
             time.sleep(0.05)
             _send_paste(hotkey_vks=self._hotkey_vks)
         finally:
-            if self._restore_clipboard and old_clipboard is not None:
+            if sys.platform == "win32" and restore:
+                self._schedule_restore(self._pending_restore, 0.5)
+            elif old_clipboard is not None:
                 threading.Timer(0.5, self._set_clipboard, args=(old_clipboard,)).start()
         logger.info("Injected text: %s", text[:80])
 
     def _get_clipboard(self) -> str | None:
-        if sys.platform == "win32":
-            try:
-                win32clipboard.OpenClipboard()
-                try:
-                    if win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
-                        return win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
-                finally:
-                    win32clipboard.CloseClipboard()
-            except Exception:
-                logger.debug("Could not read clipboard")
-            return None
-        elif sys.platform == "darwin":
+        if sys.platform == "darwin":
             try:
                 result = subprocess.run(
                     ["pbpaste"], capture_output=True, text=True, timeout=2,
@@ -201,14 +211,55 @@ class TextInjector:
             return None
         return None
 
-    def _set_clipboard(self, text: str) -> bool:
+    def _owns_open_clipboard(self, token: bytes) -> bool:
+        return (bool(win32clipboard.IsClipboardFormatAvailable(self._owner_format))
+                and win32clipboard.GetClipboardData(self._owner_format).rstrip(b"\0") == token)
+
+    def _schedule_restore(self, saved: tuple[bytes, str] | None, delay: float) -> None:
+        if saved is not None:
+            threading.Timer(delay, self._restore_windows_clipboard, args=(saved,)).start()
+
+    def _restore_windows_clipboard(self, saved: tuple[bytes, str]) -> None:
+        token, original = saved
+        for _ in range(3):
+            try:
+                win32clipboard.OpenClipboard()
+                try:
+                    if self._owns_open_clipboard(token):
+                        win32clipboard.EmptyClipboard()
+                        win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, original)
+                    if self._pending_restore == saved:
+                        self._pending_restore = None
+                finally:
+                    win32clipboard.CloseClipboard()
+                return
+            except Exception:
+                time.sleep(0.05)
+        logger.debug("Clipboard busy during restoration")
+
+    def _set_clipboard(self, text: str, preserve: bool = False) -> bool:
         if sys.platform == "win32":
             for _ in range(3):
                 try:
                     win32clipboard.OpenClipboard()
                     try:
+                        original = None
+                        if preserve:
+                            if self._owner_format is None:
+                                self._owner_format = win32clipboard.RegisterClipboardFormat("MoSheng.DictationPaste")
+                            if self._pending_restore and self._owns_open_clipboard(self._pending_restore[0]):
+                                original = self._pending_restore[1]
+                            elif win32clipboard.IsClipboardFormatAvailable(win32con.CF_UNICODETEXT):
+                                original = win32clipboard.GetClipboardData(win32con.CF_UNICODETEXT)
                         win32clipboard.EmptyClipboard()
                         win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
+                        self._pending_restore = None
+                        if original is not None:
+                            # Windows may synthesize other text formats on close.
+                            # A per-paste marker survives that, and vanishes on a new copy.
+                            token = uuid4().hex.encode("ascii")
+                            win32clipboard.SetClipboardData(self._owner_format, token)
+                            self._pending_restore = (token, original)
                     finally:
                         win32clipboard.CloseClipboard()
                     return True

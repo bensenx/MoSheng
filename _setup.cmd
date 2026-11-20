@@ -124,7 +124,10 @@ if not exist "%USERPROFILE%\.mosheng\settings.json" (
 )
 
 :: Write version marker
-> ".venv\.mosheng_version" echo 1.1.1
+".venv\Scripts\python.exe" "app_version.py" > ".venv\.mosheng_version.tmp"
+if errorlevel 1 goto :fail
+move /y ".venv\.mosheng_version.tmp" ".venv\.mosheng_version" >nul
+if errorlevel 1 goto :fail
 >> "%LOGFILE%" echo SUCCESS: setup completed
 
 echo.

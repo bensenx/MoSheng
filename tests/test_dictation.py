@@ -90,7 +90,8 @@ class WorkerTests(unittest.TestCase):
         self.injector = Mock()
         self.worker = WorkerThread(self.rec, self.engine, self.injector, self.settings)
         self.events = []
-        self.worker.state_changed.connect(lambda state, msg: self.events.append((state, msg)))
+        self.worker.state_changed.connect(lambda state, msg: self.events.append((state, msg)),
+                                          Qt.ConnectionType.DirectConnection)
         self.audio = np.ones(16000, dtype=np.float32)
         self.open_stream = self.enterContext(patch("core.audio_recorder.sd.InputStream"))
         self.open_stream.return_value.start.side_effect = lambda: self.rec._audio_callback(
@@ -106,6 +107,64 @@ class WorkerTests(unittest.TestCase):
         self.session("start", "stop")
         self.assertEqual([s for s, _ in self.events], ["loading"])
         self.open_stream.assert_not_called()
+
+    def test_back_to_back_capture_during_inference(self):
+        self._check_overlapping_recordings(progressive=False)
+
+    def test_progressive_tail_and_next_recording_during_pause_inference(self):
+        self._check_overlapping_recordings(progressive=True)
+
+    def _check_overlapping_recordings(self, progressive):
+        self.worker.progressive = progressive
+        self.worker.silence_duration = 0
+        self.worker._MIN_SPEECH_BEFORE_FLUSH = 0
+        self.worker._vad = Mock(chunk_size=512)
+        self.worker._vad.is_speech.return_value = True
+        opened = [threading.Event(), threading.Event()]
+        started_decode, resume = threading.Event(), threading.Event()
+        levels = []
+
+        def feed(level):
+            block = np.full((16000, 1), level, dtype=np.float32)
+            self.rec._audio_callback(block, len(block), None, None)
+
+        def start_stream():
+            i = int(opened[0].is_set())
+            feed(3 if i else 1)
+            opened[i].set()
+
+        def transcribe(audio, *args, **kwargs):
+            level = round(float(audio.mean()))
+            levels.append(level)
+            if len(levels) == 1:
+                started_decode.set()
+                self.assertTrue(resume.wait(5))
+            return f"Segment {level}"
+
+        self.open_stream.return_value.start.side_effect = start_stream
+        self.engine.transcribe.side_effect = transcribe
+        self.worker.start()
+        try:
+            self.worker.enqueue("start")
+            self.assertTrue(opened[0].wait(2))
+            if not progressive:
+                self.worker.enqueue("stop")
+            self.assertTrue(started_decode.wait(2))
+            if progressive:
+                feed(2)
+                self.worker.enqueue("stop")
+            self.worker.enqueue("start")
+            self.assertTrue(opened[1].wait(2), "second microphone stream waited for ASR")
+            self.worker.enqueue("stop")
+        finally:
+            resume.set()
+            self.worker.enqueue("quit")
+            self.assertTrue(self.worker.wait(5000))
+        expected = [1, 2, 3] if progressive else [1, 3]
+        self.assertEqual(levels, expected)
+        paste = self.injector.inject_text_no_restore if progressive else self.injector.inject_text
+        self.assertEqual([call.args[0] for call in paste.call_args_list],
+                         [f"Segment {level}" for level in expected])
 
     def test_worker_recovers_after_microphone_failure(self):
         self.open_stream.side_effect = [OSError("disconnected"), self.open_stream.return_value]
@@ -140,6 +199,22 @@ class WorkerTests(unittest.TestCase):
         self.engine.transcribe.return_value = "Verified speech."
         self.session("start", "stop")
         self.injector.inject_text.assert_called_once_with("Verified speech.")
+
+    def test_queued_recording_keeps_its_speaker_filter(self):
+        self.settings.set("speaker_verification", "enabled", True)
+        verifier = Mock(is_ready=True, is_enrolled=True)
+        verifier.verify.return_value = SimpleNamespace(is_user=False, path="reject", score=0.)
+        self.worker.speaker_verifier = verifier
+
+        def disable():
+            self.settings.set("speaker_verification", "enabled", False)
+            self.worker.speaker_verifier = None
+
+        self.open_stream.return_value.stop.side_effect = disable
+        self.session("start", "stop")
+        self.assertEqual(self.events[-1][0], "filtered")
+        self.engine.transcribe.assert_not_called()
+        self.injector.inject_text.assert_not_called()
 
     def test_enabling_verification_during_inference_blocks_insertion(self):
         def enable_verification(*args, **kwargs):

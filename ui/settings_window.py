@@ -144,31 +144,7 @@ class SettingsWindow(QDialog):
         scroll.setWidget(scroll_widget)
         main_layout.addWidget(scroll, 1)
 
-        # --- Language & Autostart (merged row) ---
-        lang_row = QHBoxLayout()
-        lang_row.addWidget(QLabel(tr("settings.language_label")))
-        self._lang_combo = QComboBox()
-        for code, name in SUPPORTED_LANGUAGES.items():
-            self._lang_combo.addItem(name, code)
-        current_lang = s.get("language", default=get_language())
-        for i in range(self._lang_combo.count()):
-            if self._lang_combo.itemData(i) == current_lang:
-                self._lang_combo.setCurrentIndex(i)
-                break
-        lang_row.addWidget(self._lang_combo)
-        restart_hint = QLabel(tr("settings.restart_hint"))
-        restart_hint.setObjectName("secondaryLabel")
-        lang_row.addWidget(restart_hint)
-        lang_row.addStretch()
-        self._autostart_toggle = ToggleSwitch(
-            tr("settings.autostart"),
-            checked=is_autostart_enabled(),
-        )
-        lang_row.addWidget(self._autostart_toggle)
-        content_layout.addLayout(lang_row)
-        content_layout.addSpacing(4)
-
-        # --- Hotkey Section (two-column PTT / Toggle) ---
+        # --- Hotkeys ---
         hk_group = IconGroupBox(tr("settings.hotkey_section"), "keyboard")
         hk_layout = QVBoxLayout(hk_group)
         hk_layout.setSpacing(8)
@@ -176,11 +152,6 @@ class SettingsWindow(QDialog):
         ptt = s.get("hotkey", "push_to_talk", default={})
         toggle = s.get("hotkey", "toggle", default={})
 
-        # Two-column layout
-        columns = QHBoxLayout()
-        columns.setSpacing(16)
-
-        # -- Left column: Push-to-talk --
         ptt_col = QVBoxLayout()
         ptt_col.setSpacing(6)
 
@@ -199,6 +170,7 @@ class SettingsWindow(QDialog):
         self._ptt_bind_btn = QPushButton(tr("settings.change_binding"))
         self._ptt_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("ptt"))
         ptt_key_row.addWidget(self._ptt_bind_btn)
+        ptt_key_row.addStretch()
         ptt_col.addLayout(ptt_key_row)
 
         lp_row = QHBoxLayout()
@@ -212,9 +184,8 @@ class SettingsWindow(QDialog):
         lp_row.addStretch()
         ptt_col.addLayout(lp_row)
 
-        columns.addLayout(ptt_col)
+        hk_layout.addLayout(ptt_col)
 
-        # -- Right column: Toggle --
         toggle_col = QVBoxLayout()
         toggle_col.setSpacing(6)
 
@@ -233,12 +204,10 @@ class SettingsWindow(QDialog):
         self._toggle_bind_btn = QPushButton(tr("settings.change_binding"))
         self._toggle_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("toggle"))
         toggle_key_row.addWidget(self._toggle_bind_btn)
+        toggle_key_row.addStretch()
         toggle_col.addLayout(toggle_key_row)
 
-        toggle_col.addStretch()
-        columns.addLayout(toggle_col)
-
-        hk_layout.addLayout(columns)
+        hk_layout.addLayout(toggle_col)
 
         # -- Progressive input (full width, below columns) --
         self._progressive_toggle = ToggleSwitch(
@@ -270,42 +239,6 @@ class SettingsWindow(QDialog):
 
         content_layout.addWidget(hk_group)
 
-        # --- ASR Section ---
-        asr_group = IconGroupBox(tr("settings.asr_section"), "waveform")
-        asr_layout = QVBoxLayout(asr_group)
-        asr_layout.setSpacing(12)
-
-        row3 = QHBoxLayout()
-        row3.addWidget(QLabel(tr("settings.asr_model")))
-        self._model_combo = QComboBox()
-        current_model_id = s.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-        for m in ASR_MODELS:
-            self._model_combo.addItem(m["model_name"], m["model_id"])
-        idx = self._model_combo.findData(current_model_id)
-        if idx >= 0:
-            self._model_combo.setCurrentIndex(idx)
-        row3.addWidget(self._model_combo)
-        restart_hint_model = QLabel(tr("settings.restart_hint"))
-        restart_hint_model.setObjectName("secondaryLabel")
-        row3.addWidget(restart_hint_model)
-        row3.addStretch()
-        asr_layout.addLayout(row3)
-
-        row4 = QHBoxLayout()
-        row4.addWidget(QLabel(tr("settings.device_label")))
-        self._device_combo = QComboBox()
-        devices = self._get_cuda_devices()
-        self._device_combo.addItems(devices)
-        current_device = s.get("asr", "device", default="cuda:0")
-        idx = self._device_combo.findText(current_device)
-        if idx >= 0:
-            self._device_combo.setCurrentIndex(idx)
-        row4.addWidget(self._device_combo)
-        row4.addStretch()
-        asr_layout.addLayout(row4)
-
-        content_layout.addWidget(asr_group)
-
         # --- Audio Input Section ---
         mic_group = IconGroupBox(tr("settings.audio_section"), "microphone")
         mic_layout = QVBoxLayout(mic_group)
@@ -327,6 +260,43 @@ class SettingsWindow(QDialog):
         mic_layout.addLayout(row_mic)
 
         content_layout.addWidget(mic_group)
+
+        # --- ASR Section ---
+        asr_group = IconGroupBox(tr("settings.asr_section"), "waveform")
+        asr_layout = QVBoxLayout(asr_group)
+        asr_layout.setSpacing(12)
+
+        row3 = QHBoxLayout()
+        row3.addWidget(QLabel(tr("settings.asr_model")))
+        self._model_combo = QComboBox()
+        current_model_id = s.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
+        for m in ASR_MODELS:
+            self._model_combo.addItem(m["model_name"], m["model_id"])
+        idx = self._model_combo.findData(current_model_id)
+        if idx >= 0:
+            self._model_combo.setCurrentIndex(idx)
+        row3.addWidget(self._model_combo)
+        restart_hint_model = QLabel(tr("settings.model_device_hint"))
+        restart_hint_model.setObjectName("secondaryLabel")
+        restart_hint_model.setWordWrap(True)
+        row3.addStretch()
+        asr_layout.addLayout(row3)
+
+        row4 = QHBoxLayout()
+        row4.addWidget(QLabel(tr("settings.device_label")))
+        self._device_combo = QComboBox()
+        devices = self._get_cuda_devices()
+        self._device_combo.addItems(devices)
+        current_device = s.get("asr", "device", default="cuda:0")
+        idx = self._device_combo.findText(current_device)
+        if idx >= 0:
+            self._device_combo.setCurrentIndex(idx)
+        row4.addWidget(self._device_combo)
+        row4.addStretch()
+        asr_layout.addLayout(row4)
+        asr_layout.addWidget(restart_hint_model)
+
+        content_layout.addWidget(asr_group)
 
         # --- Speaker Verification Section ---
         sv_group = IconGroupBox(tr("settings.speaker_section"), "shield")
@@ -356,12 +326,13 @@ class SettingsWindow(QDialog):
 
         content_layout.addWidget(sv_group)
 
-        # --- Output Section (horizontal toggles) ---
+        # --- Output Section ---
         out_group = IconGroupBox(tr("settings.output_section"), "gear")
-        out_layout = QHBoxLayout(out_group)
+        out_layout = QVBoxLayout(out_group)
         out_layout.setSpacing(16)
 
-        out_layout.addWidget(QLabel(tr("settings.sound_style_label")))
+        sound_row = QHBoxLayout()
+        sound_row.addWidget(QLabel(tr("settings.sound_style_label")))
         self._sound_combo = QComboBox()
         for key, i18n_key in [
             ("bell", "settings.sound_style_bell"),
@@ -372,7 +343,9 @@ class SettingsWindow(QDialog):
             self._sound_combo.addItem(tr(i18n_key), key)
         self._sound_combo.setCurrentIndex(self._sound_combo.findData(
             s.get("output", "sound_style", default="bell")))
-        out_layout.addWidget(self._sound_combo)
+        sound_row.addWidget(self._sound_combo)
+        sound_row.addStretch()
+        out_layout.addLayout(sound_row)
 
         self._overlay_toggle = ToggleSwitch(
             tr("settings.overlay_toggle"),
@@ -385,7 +358,6 @@ class SettingsWindow(QDialog):
             checked=s.get("output", "restore_clipboard", default=True),
         )
         out_layout.addWidget(self._restore_toggle)
-        out_layout.addStretch()
 
         content_layout.addWidget(out_group)
 
@@ -420,7 +392,7 @@ class SettingsWindow(QDialog):
 
         # --- Text Processing Section ---
         tp_group = IconGroupBox(tr("settings.text_processing_section"), "gear")
-        tp_layout = QHBoxLayout(tp_group)
+        tp_layout = QVBoxLayout(tp_group)
         tp_layout.setSpacing(16)
         self._remove_fillers_toggle = ToggleSwitch(
             tr("settings.remove_fillers"),
@@ -432,8 +404,37 @@ class SettingsWindow(QDialog):
             checked=s.get("text_processing", "smart_punctuation", default=True),
         )
         tp_layout.addWidget(self._smart_punct_toggle)
-        tp_layout.addStretch()
+        punct_hint = QLabel(tr("settings.smart_punct_hint"))
+        punct_hint.setObjectName("secondaryLabel")
+        punct_hint.setWordWrap(True)
+        tp_layout.addWidget(punct_hint)
         content_layout.addWidget(tp_group)
+
+        general_group = IconGroupBox(tr("settings.general_section"), "gear")
+        general_layout = QVBoxLayout(general_group)
+        lang_row = QHBoxLayout()
+        lang_row.addWidget(QLabel(tr("settings.language_label")))
+        self._lang_combo = QComboBox()
+        for code, name in SUPPORTED_LANGUAGES.items():
+            self._lang_combo.addItem(name, code)
+        current_lang = s.get("language", default=get_language())
+        for i in range(self._lang_combo.count()):
+            if self._lang_combo.itemData(i) == current_lang:
+                self._lang_combo.setCurrentIndex(i)
+                break
+        lang_row.addWidget(self._lang_combo)
+        restart_hint = QLabel(tr("settings.restart_hint"))
+        restart_hint.setObjectName("secondaryLabel")
+        restart_hint.setWordWrap(True)
+        lang_row.addStretch()
+        self._autostart_toggle = ToggleSwitch(
+            tr("settings.autostart"),
+            checked=is_autostart_enabled(),
+        )
+        general_layout.addLayout(lang_row)
+        general_layout.addWidget(restart_hint)
+        general_layout.addWidget(self._autostart_toggle)
+        content_layout.addWidget(general_group)
 
         # --- Buttons ---
         main_layout.addSpacing(8)

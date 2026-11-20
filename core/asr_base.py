@@ -26,6 +26,13 @@ class ASRBase(ABC):
     def unload_model(self) -> None:
         """Release model resources."""
 
+    def warmup(self) -> None:
+        """Run a dummy inference so the first real call is fast.
+
+        Default no-op. Subclasses may override to pre-allocate kernels.
+        Safe to call from any thread; safe to call before/after load_model.
+        """
+
     @property
     @abstractmethod
     def is_ready(self) -> bool:

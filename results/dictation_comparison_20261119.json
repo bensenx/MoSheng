@@ -1,0 +1,80 @@
+{
+  "baseline": "Pre-change working tree on main at da1c157, including local startup changes",
+  "platform": "Windows, Python 3.13.5, NVIDIA GeForce RTX 5090, torch 2.10.0+cu128",
+  "recorder": {
+    "method": "Median of five runs of scripts/benchmark_recorder.py per duration. Mono float32 at 16 kHz, 800 samples per callback, one VAD read per callback, no intermediate drain. Times exclude capture, VAD inference and transcription.",
+    "audio_seconds": [
+      5,
+      30,
+      60
+    ],
+    "before_read_ms": [
+      1.936,
+      187.094,
+      716.139
+    ],
+    "after_read_ms": [
+      0.097,
+      0.594,
+      1.257
+    ]
+  },
+  "settings": {
+    "method": "Native Windows Qt backend, hidden window, system fonts, default 560 logical pixels, 506-pixel viewport. Read horizontal scrollbar maximum after layout.",
+    "before_overflow_px": {
+      "en": 162,
+      "zh": 154
+    },
+    "after_overflow_px": {
+      "en": 0,
+      "zh": 0
+    }
+  },
+  "dictation": {
+    "method": "Three separate Python processes per version, fresh temporary settings profiles, cached offline Qwen3-ASR-1.7B on CUDA, speaker verification disabled. Timings from probe entry, before importing the app, to ASR attachment, warmup completion and detection of the first text insertion call. A timer submitted the same 2.735-second synthetic English clip once the engine was attached and warm. Input stream, global hotkeys, sound and destination clipboard were substituted. This is a first-warmed-transcript comparison.",
+    "order": [
+      "before",
+      "after",
+      "after",
+      "before",
+      "before",
+      "after"
+    ],
+    "expected_transcript": "Please bring the meeting notes tomorrow.",
+    "matching_transcripts": 6,
+    "before": {
+      "engine_attached_s": [
+        11.39,
+        11.619,
+        11.082
+      ],
+      "warmup_complete_s": [
+        27.177,
+        27.309,
+        26.817
+      ],
+      "first_insert_call_s": [
+        27.61,
+        27.732,
+        27.213
+      ]
+    },
+    "after": {
+      "engine_attached_s": [
+        27.124,
+        27.391,
+        27.09
+      ],
+      "warmup_complete_s": [
+        27.124,
+        27.391,
+        27.09
+      ],
+      "first_insert_call_s": [
+        27.579,
+        27.905,
+        27.539
+      ]
+    }
+  }
+}

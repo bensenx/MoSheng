@@ -20,7 +20,7 @@ class VerifyResult:
     audio: np.ndarray | None  # Filtered audio (user segments only), or None if rejected
     is_user: bool             # Whether user speech was detected
     score: float              # Similarity score (fast path) or max segment score
-    path: str                 # "bypass" | "fast_accept" | "fast_reject" | "slow_accept" | "slow_reject"
+    path: str                 # "fast_accept" | "fast_reject" | "slow_accept" | "slow_reject"
 
 
 class SpeakerVerifier:
@@ -165,7 +165,7 @@ class SpeakerVerifier:
         Slow path: window-based segmentation + per-segment verification.
         """
         if not self.is_ready or not self.is_enrolled:
-            return VerifyResult(audio=audio, is_user=True, score=1.0, path="bypass")
+            raise RuntimeError("Speaker verification requires a loaded model and enrollment")
 
         # Fast path: whole-audio embedding
         emb = self.extract_embedding(audio, sample_rate)

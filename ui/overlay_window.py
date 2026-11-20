@@ -23,6 +23,7 @@ STATE_RECOGNIZING = "recognizing"
 STATE_RESULT = "result"
 STATE_ERROR = "error"
 STATE_FILTERED = "filtered"
+STATE_LOADING = "loading"
 
 # State → (stateBrightness, stateHue) for shader modulation
 _STATE_VISUALS = {
@@ -31,6 +32,7 @@ _STATE_VISUALS = {
     STATE_RESULT:      (1.3, 0.3),
     STATE_ERROR:       (0.8, 0.0),
     STATE_FILTERED:    (0.7, 0.5),
+    STATE_LOADING:     (0.9, 0.5),
 }
 
 # QML file path (relative to this file)
@@ -117,7 +119,7 @@ class OverlayWindow:
         self._ready = True
         logger.info("QML overlay ready (view size: %dx%d)", self._view.width(), self._view.height())
 
-    def _update_geometry(self) -> None:
+    def _update_geometry(self, show_message: bool = False) -> None:
         screen = QApplication.primaryScreen()
         if screen is None:
             self._view.setWidth(400)
@@ -125,6 +127,8 @@ class OverlayWindow:
             return
         geo = screen.availableGeometry()
         w = int(geo.width() * self.WIDTH_RATIO)
+        if show_message:
+            w = min(geo.width(), max(w, 320))
         self._view.setWidth(w)
         self._view.setHeight(self.HEIGHT)
         x = geo.x() + (geo.width() - w) // 2
@@ -257,6 +261,9 @@ class OverlayWindow:
         elif self._state == STATE_RECOGNIZING:
             t = time.monotonic() - self._breath_start
             self._target_rms = 0.3 + 0.2 * math.sin(2.0 * math.pi * t / 2.0)
+        elif self._state == STATE_LOADING:
+            t = time.monotonic() - self._breath_start
+            self._target_rms = 0.25 + 0.15 * math.sin(2.0 * math.pi * t / 1.5)
         elif self._state in (STATE_RESULT, STATE_ERROR, STATE_FILTERED):
             t = time.monotonic() - self._breath_start
             self._target_rms = max(0.35 * math.exp(-t * 1.5), 0.0)
@@ -289,6 +296,10 @@ class OverlayWindow:
             return
 
         self._hide_timer.stop()
+        message = text if state in (STATE_LOADING, STATE_FILTERED, STATE_ERROR) else ""
+        if self._root.property("statusMessage") != message:
+            self._root.setProperty("statusMessage", message)
+            self._update_geometry(bool(message))
         self._state = state
 
         brightness, hue = _STATE_VISUALS.get(state, _STATE_VISUALS[STATE_RECORDING])
@@ -317,6 +328,15 @@ class OverlayWindow:
             if not self._frame_timer.isActive():
                 self._frame_timer.start(self.FRAME_INTERVAL_MS)
 
+        elif state == STATE_LOADING:
+            self._breath_start = time.monotonic()
+            self._band_smooth[:] = 0.0
+            self._zero_bands()
+            self._show_instant()
+            if not self._frame_timer.isActive():
+                self._frame_timer.start(self.FRAME_INTERVAL_MS)
+            self._hide_timer.start(1500)
+
         elif state in (STATE_RESULT, STATE_ERROR, STATE_FILTERED):
             self._breath_start = time.monotonic()
             self._display_rms = 0.35
@@ -325,7 +345,7 @@ class OverlayWindow:
             self._show_instant()
             if not self._frame_timer.isActive():
                 self._frame_timer.start(self.FRAME_INTERVAL_MS)
-            duration = 1000 if state == STATE_FILTERED else self.RESULT_DISPLAY_MS
+            duration = 3500 if state == STATE_ERROR else self.RESULT_DISPLAY_MS
             self._hide_timer.start(duration)
 
         if self._root is not None:

@@ -70,7 +70,9 @@ if sys.platform == "win32":
 
     def _send_inputs(*inputs):
         arr = (INPUT * len(inputs))(*inputs)
-        ctypes.windll.user32.SendInput(len(inputs), ctypes.byref(arr), ctypes.sizeof(INPUT))
+        sent = ctypes.windll.user32.SendInput(len(inputs), ctypes.byref(arr), ctypes.sizeof(INPUT))
+        if sent != len(inputs):
+            raise OSError("Windows did not accept all keyboard events")
 
     def _send_paste(hotkey_vks: frozenset[int] = frozenset()):
         inputs: list[INPUT] = []
@@ -154,7 +156,8 @@ class TextInjector:
         if not text.strip():
             logger.info("Empty text, skipping injection")
             return
-        self._set_clipboard(text)
+        if not self._set_clipboard(text):
+            raise RuntimeError("Could not write transcription to the clipboard")
         time.sleep(0.05)
         _send_paste(hotkey_vks=self._hotkey_vks)
         logger.info("Injected text (no restore): %s", text[:80])
@@ -164,12 +167,15 @@ class TextInjector:
             logger.info("Empty text, skipping injection")
             return
         old_clipboard = self._get_clipboard() if self._restore_clipboard else None
-        self._set_clipboard(text)
-        time.sleep(0.05)
-        _send_paste(hotkey_vks=self._hotkey_vks)
+        if not self._set_clipboard(text):
+            raise RuntimeError("Could not write transcription to the clipboard")
+        try:
+            time.sleep(0.05)
+            _send_paste(hotkey_vks=self._hotkey_vks)
+        finally:
+            if self._restore_clipboard and old_clipboard is not None:
+                threading.Timer(0.5, self._set_clipboard, args=(old_clipboard,)).start()
         logger.info("Injected text: %s", text[:80])
-        if self._restore_clipboard and old_clipboard is not None:
-            threading.Timer(0.5, self._set_clipboard, args=(old_clipboard,)).start()
 
     def _get_clipboard(self) -> str | None:
         if sys.platform == "win32":
@@ -195,7 +201,7 @@ class TextInjector:
             return None
         return None
 
-    def _set_clipboard(self, text: str) -> None:
+    def _set_clipboard(self, text: str) -> bool:
         if sys.platform == "win32":
             for _ in range(3):
                 try:
@@ -205,7 +211,7 @@ class TextInjector:
                         win32clipboard.SetClipboardData(win32con.CF_UNICODETEXT, text)
                     finally:
                         win32clipboard.CloseClipboard()
-                    return
+                    return True
                 except Exception:
                     time.sleep(0.05)
             logger.warning("Failed to set clipboard after retries")
@@ -214,5 +220,7 @@ class TextInjector:
                 subprocess.run(
                     ["pbcopy"], input=text, text=True, timeout=2, check=True,
                 )
+                return True
             except Exception:
                 logger.warning("Failed to set clipboard")
+        return False

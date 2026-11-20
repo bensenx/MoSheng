@@ -145,7 +145,12 @@ class EnrollmentDialog(QDialog):
 
         input_dev = self._settings.get("audio", "input_device", default=None)
         self._recorder = AudioRecorder(sample_rate=16000, device=input_dev)
-        self._recorder.start_recording()
+        try:
+            self._recorder.start_recording()
+        except Exception:
+            logger.exception("Could not open the enrollment microphone")
+            self._status_label.setText(tr("worker.recording_failed"))
+            return
         self._is_recording = True
 
         self._record_btn.setText(tr("enrollment.stop_recording"))
@@ -170,13 +175,18 @@ class EnrollmentDialog(QDialog):
         self._level_timer.stop()
         self._level_bar.setValue(0)
 
-        audio = self._recorder.stop_recording()
-        self._recorder = None
-
-        self._record_btn.setText(tr("enrollment.start_recording"))
-        self._record_btn.setObjectName("primaryButton")
-        self._record_btn.style().unpolish(self._record_btn)
-        self._record_btn.style().polish(self._record_btn)
+        try:
+            audio = self._recorder.stop_recording()
+        except Exception:
+            logger.exception("Could not finish enrollment recording")
+            self._status_label.setText(tr("worker.recording_failed"))
+            return
+        finally:
+            self._recorder = None
+            self._record_btn.setText(tr("enrollment.start_recording"))
+            self._record_btn.setObjectName("primaryButton")
+            self._record_btn.style().unpolish(self._record_btn)
+            self._record_btn.style().polish(self._record_btn)
 
         if audio is None or len(audio) / 16000 < MIN_DURATION_SEC:
             self._status_label.setText(tr("enrollment.too_short", seconds=f"{MIN_DURATION_SEC:.0f}"))

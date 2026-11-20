@@ -2,6 +2,7 @@
 
 import logging
 import time
+from copy import copy
 
 import numpy as np
 import torch
@@ -30,6 +31,7 @@ class QwenASREngine(ASRBase):
         return self._model is not None
 
     def load_model(self) -> None:
+        """Load weights to GPU. Does NOT warm up — call warmup() separately."""
         logger.info("Loading Qwen3-ASR model: %s on %s", self._model_id, self._device)
         t0 = time.time()
 
@@ -44,11 +46,20 @@ class QwenASREngine(ASRBase):
         elapsed = time.time() - t0
         logger.info("Model loaded in %.1fs", elapsed)
 
-        # Warmup with a short silent audio to ensure first real inference is fast
+    def warmup(self) -> None:
+        """Run one silent-audio inference so the first real call avoids cuDNN autotune."""
+        if self._model is None:
+            return
         logger.info("Warming up model...")
+        t0 = time.time()
         dummy = np.zeros(16000, dtype=np.float32)  # 1 second of silence
-        self._model.transcribe(audio=(dummy, 16000), language=None)
-        logger.info("Warmup complete")
+        # Share weights and processor, but give the probe its own generation limit.
+        # Two tokens exercise prefill and a cached decode without decoding silence
+        # up to the user's full dictation limit.
+        probe = copy(self._model)
+        probe.max_new_tokens = min(2, self._max_new_tokens)
+        probe.transcribe(audio=(dummy, 16000), language=None)
+        logger.info("Warmup complete (%.2fs)", time.time() - t0)
 
     def transcribe(self, audio: np.ndarray, sample_rate: int = 16000,
                    context: str = "") -> str:

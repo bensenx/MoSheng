@@ -68,7 +68,7 @@ else:
 
 
 def check_environment() -> bool:
-    """Check GPU and audio device availability."""
+    """Check the inference runtime. Each recording opens the selected microphone."""
     logger = logging.getLogger(__name__)
 
     try:
@@ -91,29 +91,7 @@ def check_environment() -> bool:
         _fatal_msgbox(tr("error.pytorch_load_failed", error=e), tr("error.title"))
         return False
 
-    try:
-        import sounddevice as sd
-        default_in = sd.query_devices(kind="input")
-        logger.info("Audio input: %s", default_in["name"])
-    except Exception as e:
-        logger.error("No audio input device: %s", e)
-        from i18n import tr
-        _fatal_msgbox(tr("error.no_microphone", error=e), tr("error.title"))
-        return False
-
     return True
-
-
-def _get_device(settings: SettingsManager) -> str:
-    """Determine compute device from settings."""
-    device_setting = settings.get("asr", "device", default="auto")
-    if device_setting not in ("auto", "cuda:0"):
-        return device_setting
-    import torch
-    if sys.platform == "darwin":
-        return "mps" if torch.backends.mps.is_available() else "cpu"
-    else:
-        return "cuda:0" if torch.cuda.is_available() else "cpu"
 
 
 def load_asr_engine(settings: SettingsManager):
@@ -121,7 +99,7 @@ def load_asr_engine(settings: SettingsManager):
     from core.asr_qwen import QwenASREngine
 
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-    device = _get_device(settings)
+    device = settings.asr_device()
     dtype = settings.get("asr", "dtype", default="bfloat16")
     max_tokens = settings.get("asr", "max_new_tokens", default=256)
 
@@ -136,31 +114,6 @@ def load_asr_engine(settings: SettingsManager):
     return engine
 
 
-def load_speaker_verifier(settings: SettingsManager):
-    logger = logging.getLogger(__name__)
-    from config import SPEAKER_DIR
-
-    enabled = settings.get("speaker_verification", "enabled", default=False)
-    if not enabled:
-        logger.info("Speaker verification not enabled, skipping.")
-        return None
-
-    from core.speaker_verifier import SpeakerVerifier
-
-    device = _get_device(settings)
-    verifier = SpeakerVerifier(device=device)
-
-    threshold = settings.get("speaker_verification", "threshold", default=0.25)
-    high = settings.get("speaker_verification", "high_threshold", default=0.40)
-    low = settings.get("speaker_verification", "low_threshold", default=0.10)
-    verifier.update_thresholds(threshold, high, low)
-
-    verifier.load_model()
-    verifier.load_enrollment(SPEAKER_DIR)
-    logger.info("Speaker verification model loaded.")
-    return verifier
-
-
 def main():
     lock = _acquire_single_instance()
     if lock is None:
@@ -171,6 +124,7 @@ def main():
     logger = logging.getLogger(__name__)
     logger.info("%s v%s starting", APP_NAME, APP_VERSION)
 
+    from PySide6.QtCore import QThread, Signal
     from PySide6.QtGui import QIcon
     from PySide6.QtWidgets import QApplication
     from ui.styles import FLUENT_DARK_STYLESHEET
@@ -196,12 +150,9 @@ def main():
     splash = SplashScreen()
     splash.show()
     qt_app.processEvents()
+    logger.info("[startup] splash_visible")
 
-    splash.set_status("Checking environment...")
-    qt_app.processEvents()
-    if not check_environment():
-        sys.exit(1)
-
+    # ---- One-time model download (kept on main thread; has its own progress UI) ----
     from core.model_downloader import is_model_cached, ModelDownloadThread
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
     if not is_model_cached(model_id):
@@ -233,26 +184,59 @@ def main():
             )
             sys.exit(1)
 
-    splash.set_status("Loading ASR model...")
+    # ---- Bring up tray + hotkey IMMEDIATELY (no engine yet) ----
+    from ui.app import MoShengApp
+    app = MoShengApp(asr_engine=None, settings=settings, speaker_verifier=None)
+    app.start()
+    logger.info("[startup] tray_active")
+
+    splash.set_status(tr("tray.loading"))
     splash.set_hint(tr("splash.loading_asr_hint"))
     qt_app.processEvents()
-    asr_engine = load_asr_engine(settings)
-    splash.set_hint("")
-    atexit.register(asr_engine.unload_model)
 
-    splash.set_status("Loading speaker verification...")
-    qt_app.processEvents()
-    speaker_verifier = load_speaker_verifier(settings)
-    if speaker_verifier:
-        atexit.register(speaker_verifier.unload_model)
+    # ---- Background worker: runtime check, ASR load and warmup ----
 
-    from ui.app import MoShengApp
-    app = MoShengApp(asr_engine=asr_engine, settings=settings,
-                     speaker_verifier=speaker_verifier)
-    app.start()
-    splash.finish()
+    class StartupWorker(QThread):
+        stage = Signal(str)
+        asr_ready = Signal(object)
+        failed = Signal()
 
-    logger.info("MoSheng ready.")
+        def __init__(self, settings_):
+            super().__init__()
+            self._settings = settings_
+
+        def run(self):
+            try:
+                self.stage.emit(tr("splash.checking"))
+                if not check_environment():
+                    self.failed.emit()
+                    return
+
+                self.stage.emit(tr("tray.loading"))
+                engine = load_asr_engine(self._settings)
+                self.stage.emit(tr("splash.warming"))
+                engine.warmup()
+                self.asr_ready.emit(engine)
+            except Exception as e:
+                logging.getLogger(__name__).exception("Background startup failed")
+                _fatal_msgbox(f"Background startup failed: {e}")
+                self.failed.emit()
+
+    def _on_asr_ready(engine):
+        app.attach_asr(engine)
+        atexit.register(engine.unload_model)
+        splash.set_hint("")
+        splash.finish()
+
+    worker = StartupWorker(settings)
+    worker.stage.connect(splash.set_status)
+    worker.asr_ready.connect(_on_asr_ready)
+    worker.failed.connect(app._quit)
+    qt_app.aboutToQuit.connect(worker.wait)
+    worker.start()
+    qt_app._startup_worker = worker  # keep ref
+
+    logger.info("MoSheng tray+hotkey ready; model loading in background.")
 
     try:
         sys.exit(qt_app.exec())

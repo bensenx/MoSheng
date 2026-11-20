@@ -4,6 +4,7 @@ import json
 import os
 import copy
 import logging
+import sys
 
 from config import SETTINGS_DIR, SETTINGS_FILE, DEFAULT_SETTINGS
 
@@ -11,6 +12,15 @@ logger = logging.getLogger(__name__)
 
 
 class SettingsManager:
+    def asr_device(self) -> str:
+        selected = self.get("asr", "device", default="auto")
+        if selected not in ("auto", "cuda:0"):
+            return selected
+        import torch
+        if sys.platform == "darwin":
+            return "mps" if torch.backends.mps.is_available() else "cpu"
+        return "cuda:0" if torch.cuda.is_available() else "cpu"
+
     def __init__(self):
         self._settings = copy.deepcopy(DEFAULT_SETTINGS)
         self._ensure_dir()

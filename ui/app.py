@@ -8,7 +8,7 @@ import os
 
 import numpy as np
 
-from PySide6.QtCore import QThread, QTimer, Signal, Slot, Qt
+from PySide6.QtCore import QObject, QThread, QTimer, Signal, Slot, Qt
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
@@ -25,6 +25,7 @@ from core.hotkey_manager import DualHotkeyManager
 from ui.overlay_window import (
     OverlayWindow, STATE_RECORDING, STATE_RECOGNIZING,
     STATE_RESULT, STATE_ERROR, STATE_FILTERED, STATE_IDLE,
+    STATE_LOADING,
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class WorkerThread(QThread):
     _MIN_SPEECH_BEFORE_FLUSH = 0.5   # seconds of speech required before allowing flush
     _MAX_SILENCE_FORCE_FLUSH = 3.0   # seconds of continuous silence to force-flush
 
-    def __init__(self, recorder: AudioRecorder, asr: ASRBase,
+    def __init__(self, recorder: AudioRecorder, asr: ASRBase | None,
                  injector: TextInjector, settings: SettingsManager,
                  speaker_verifier=None):
         super().__init__()
@@ -51,6 +52,7 @@ class WorkerThread(QThread):
         self._injector = injector
         self._settings = settings
         self._speaker_verifier = speaker_verifier
+        self.verifier_error = ""
         self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._text_processor = TextProcessor(
             remove_fillers=settings.get("text_processing", "remove_fillers", default=True),
@@ -102,20 +104,52 @@ class WorkerThread(QThread):
     def enqueue(self, cmd: str) -> None:
         self._cmd_queue.put(cmd)
 
+    def readiness_issue(self) -> tuple[str, str] | None:
+        if self._asr is None or not self._asr.is_ready:
+            return STATE_LOADING, tr("tray.loading")
+        if self._settings.get("speaker_verification", "enabled", default=False):
+            verifier = self._speaker_verifier
+            if self.verifier_error:
+                return STATE_ERROR, self.verifier_error
+            if verifier is None or not verifier.is_ready:
+                return STATE_LOADING, tr("worker.loading_verifier")
+            if not verifier.is_enrolled:
+                return STATE_ERROR, tr("worker.enroll_first")
+        return None
+
     def run(self) -> None:
         while True:
             cmd = self._cmd_queue.get()
             if cmd == CMD_QUIT:
+                if self._recorder.is_recording:
+                    try:
+                        self._recorder.stop_recording()
+                    except Exception:
+                        logger.exception("Could not close the microphone on exit")
                 break
-            elif cmd == CMD_START:
-                self._handle_start()
-            elif cmd == CMD_STOP:
-                self._handle_stop()
+            try:
+                if cmd == CMD_START and not self._recorder.is_recording:
+                    self._handle_start()
+                elif cmd == CMD_STOP and self._recorder.is_recording:
+                    self._handle_stop()
+            except Exception:
+                logger.exception("Recording session failed")
+                try:
+                    if self._recorder.is_recording:
+                        self._recorder.stop_recording()
+                except Exception:
+                    logger.exception("Could not close the input stream")
+                self.state_changed.emit(STATE_ERROR, tr("worker.recording_failed"))
 
     def _handle_start(self) -> None:
+        issue = self.readiness_issue()
+        if issue:
+            self.state_changed.emit(*issue)
+            return
         logger.info("Recording start (progressive=%s)", self._progressive)
         self._text_processor.reset_session()
         self._recorder.start_recording()
+        self.state_changed.emit(STATE_RECORDING, "")
         if self._sound_player:
             self._sound_player.play_start()
 
@@ -126,14 +160,22 @@ class WorkerThread(QThread):
 
     def _run_progressive_loop(self) -> None:
         """Monitor for speech pauses and transcribe incrementally."""
-        import time
-
-        if self._settings.get("output", "restore_clipboard", default=True):
+        restore_clipboard = self._settings.get("output", "restore_clipboard", default=True)
+        if restore_clipboard:
             self._injector.save_clipboard()
+        try:
+            self._process_progressive_audio()
+        finally:
+            if restore_clipboard:
+                self._injector.restore_saved_clipboard()
+
+    def _process_progressive_audio(self) -> None:
+        import time
 
         silence_start: float | None = None
         speech_start: float | None = None
         injected_any = False
+        last_outcome = None
         vad_leftover = np.array([], dtype=np.float32)
 
         while True:
@@ -143,7 +185,7 @@ class WorkerThread(QThread):
                     break
                 elif cmd == CMD_QUIT:
                     self._cmd_queue.put(CMD_QUIT)
-                    break
+                    return
             except queue.Empty:
                 pass
 
@@ -171,20 +213,16 @@ class WorkerThread(QThread):
                 elif speech_start is not None and silence_start is not None:
                     silence_elapsed = time.monotonic() - silence_start
                     speech_duration = silence_start - speech_start
-                    if (silence_elapsed >= self._silence_duration
-                            and speech_duration >= self._MIN_SPEECH_BEFORE_FLUSH):
+                    pause = (silence_elapsed >= self._silence_duration
+                             and speech_duration >= self._MIN_SPEECH_BEFORE_FLUSH)
+                    if pause or silence_elapsed >= self._MAX_SILENCE_FORCE_FLUSH:
                         audio = self._recorder.drain_buffer()
-                        if self._flush_and_inject(audio, use_clipboard_restore=False):
+                        last_outcome = self._flush_and_inject(audio, use_clipboard_restore=False)
+                        if last_outcome[0] == STATE_RESULT:
                             injected_any = True
-                        self.state_changed.emit(STATE_RECORDING, "")
-                        silence_start = None
-                        speech_start = None
-                        vad_leftover = np.array([], dtype=np.float32)
-                    elif silence_elapsed >= self._MAX_SILENCE_FORCE_FLUSH:
-                        audio = self._recorder.drain_buffer()
-                        if self._flush_and_inject(audio, use_clipboard_restore=False):
-                            injected_any = True
-                        self.state_changed.emit(STATE_RECORDING, "")
+                            self.state_changed.emit(STATE_RECORDING, "")
+                        else:
+                            self.state_changed.emit(*last_outcome)
                         silence_start = None
                         speech_start = None
                         vad_leftover = np.array([], dtype=np.float32)
@@ -198,54 +236,51 @@ class WorkerThread(QThread):
         if self._sound_player:
             self._sound_player.play_stop()
 
-        final_ok = False
         min_dur = self._settings.get("audio", "min_duration", default=0.3)
         if audio is not None and len(audio) / self._recorder.sample_rate >= min_dur:
-            final_ok = self._flush_and_inject(audio, use_clipboard_restore=False)
-            if final_ok:
-                injected_any = True
+            outcome = self._flush_and_inject(audio, use_clipboard_restore=False)
+            injected_any |= outcome[0] == STATE_RESULT
+            self.state_changed.emit(*outcome)
+        elif last_outcome is None:
+            self.state_changed.emit(STATE_ERROR, tr("worker.no_content"))
+        elif last_outcome[0] == STATE_RESULT:
+            self.state_changed.emit(STATE_IDLE, "")
 
         period = self._text_processor.consume_pending_period()
         if period and injected_any:
             self._injector.inject_char_unicode(period)
-
-        if self._settings.get("output", "restore_clipboard", default=True):
-            self._injector.restore_saved_clipboard()
-
-        if not injected_any:
-            self.state_changed.emit(STATE_ERROR, tr("worker.no_content"))
-        elif not final_ok:
-            self.state_changed.emit(STATE_IDLE, "")
 
     def _handle_stop(self) -> None:
         audio = self._recorder.stop_recording()
         if self._sound_player:
             self._sound_player.play_stop()
 
-        if not self._flush_and_inject(audio, use_deferred_period=False):
-            self.state_changed.emit(STATE_ERROR, tr("worker.too_short"))
+        self.state_changed.emit(*self._flush_and_inject(audio, use_deferred_period=False))
 
     def _flush_and_inject(self, audio: np.ndarray | None,
                           use_clipboard_restore: bool = True,
-                          use_deferred_period: bool = True) -> bool:
-        """Transcribe audio and inject text. Returns True if text was injected."""
+                          use_deferred_period: bool = True) -> tuple[str, str]:
+        """Return one terminal state and its message for this segment."""
         min_duration = self._settings.get("audio", "min_duration", default=0.3)
         if audio is None or len(audio) / self._recorder.sample_rate < min_duration:
-            return False
+            return STATE_ERROR, tr("worker.too_short")
 
-        # Speaker verification (if enabled and enrolled)
-        if (self._speaker_verifier is not None
-                and self._settings.get("speaker_verification", "enabled", default=False)):
+        issue = self.readiness_issue()
+        if issue:
+            return issue
+        verified_by = None
+        if self._settings.get("speaker_verification", "enabled", default=False):
             try:
-                result = self._speaker_verifier.verify(audio, self._recorder.sample_rate)
+                verified_by = self._speaker_verifier
+                result = verified_by.verify(audio, self._recorder.sample_rate)
                 if not result.is_user:
                     logger.info("Speaker filtered: path=%s, score=%.4f", result.path, result.score)
-                    self.state_changed.emit(STATE_FILTERED, "")
-                    return False
+                    return STATE_FILTERED, tr("overlay.filtered")
                 if result.audio is not None:
                     audio = result.audio
             except Exception:
-                logger.exception("Speaker verification failed, proceeding with ASR")
+                logger.exception("Speaker verification failed")
+                return STATE_ERROR, tr("worker.verification_failed")
 
         self.state_changed.emit(STATE_RECOGNIZING, "")
 
@@ -260,27 +295,54 @@ class WorkerThread(QThread):
             if (self._text_processor.meaningful_length(text) <= 1
                     and audio_duration < 1.0):
                 logger.debug("Quality filter: rejected '%s' (%.2fs audio)", text, audio_duration)
-                return False
+                return STATE_ERROR, tr("worker.no_content")
 
-            if text.strip():
-                if use_clipboard_restore:
-                    self._injector.inject_text(text)
-                else:
-                    self._injector.inject_text_no_restore(text)
-                self.state_changed.emit(STATE_RESULT, text)
-                return True
         except Exception:
             logger.exception("Transcription failed")
-            self.state_changed.emit(STATE_ERROR, tr("worker.recognition_failed"))
-        return False
+            return STATE_ERROR, tr("worker.recognition_failed")
+        if not text.strip():
+            return STATE_ERROR, tr("worker.no_content")
+        # A settings change during inference can enable or replace the verifier.
+        if self._settings.get("speaker_verification", "enabled", default=False):
+            if verified_by is None or verified_by is not self._speaker_verifier:
+                return STATE_ERROR, tr("worker.verification_failed")
+        try:
+            if use_clipboard_restore:
+                self._injector.inject_text(text)
+            else:
+                self._injector.inject_text_no_restore(text)
+        except Exception:
+            logger.exception("Text insertion failed")
+            return STATE_ERROR, tr("worker.insertion_failed")
+        return STATE_RESULT, text
 
 
-class MoShengApp:
+class SpeakerLoader(QThread):
+    def __init__(self, settings):
+        super().__init__()
+        self._settings = settings
+        self.verifier = None
+
+    def run(self):
+        try:
+            from core.speaker_verifier import SpeakerVerifier
+            verifier = SpeakerVerifier(device=self._settings.asr_device())
+            verifier.load_model()
+            self.verifier = verifier
+        except Exception:
+            logger.exception("Could not load the speaker verifier")
+
+
+class MoShengApp(QObject):
     """Main application: tray icon, overlay, worker thread, hotkey manager."""
 
-    def __init__(self, asr_engine: ASRBase, settings: SettingsManager,
+    def __init__(self, asr_engine: ASRBase | None, settings: SettingsManager,
                  speaker_verifier=None):
+        super().__init__()
         self._settings = settings
+        self._verifier_loader = None
+        self._microphone_error = ""
+        self._reported_ready = False
         self._speaker_verifier = speaker_verifier
 
         # Migrate old single-hotkey config to dual-binding format
@@ -348,7 +410,7 @@ class MoShengApp:
         self._tray = QSystemTrayIcon()
         if self._app_icon:
             self._tray.setIcon(self._app_icon)
-        self._tray.setToolTip(tr("tray.ready"))
+        self._refresh_readiness()
 
         menu = QMenu()
         settings_action = QAction(tr("tray.settings"), menu)
@@ -376,28 +438,69 @@ class MoShengApp:
         self._hook_health_timer.start(60_000)
 
     def start(self) -> None:
+        self._check_microphone()
+        self._sync_speaker_verifier()
+        self._refresh_readiness()
         self._hotkey.start()
         self._worker.start()
         self._tray.show()
-        logger.info("MoSheng ready (dual hotkey mode)")
+        QApplication.instance().aboutToQuit.connect(self._shutdown)
+        logger.info("MoSheng tray and hotkeys active")
 
     # ---- Hotkey callbacks ----
 
     def _on_hotkey_start(self) -> None:
-        self._worker.state_changed.emit(STATE_RECORDING, "")
+        issue = self._worker.readiness_issue()
+        if issue:
+            self._worker.state_changed.emit(*issue)
+            return
         self._worker.enqueue(CMD_START)
+
+    # ---- Deferred attach for background-loaded engine ----
+
+    def attach_asr(self, engine: ASRBase) -> None:
+        """Wire in the ASR engine after the background loader finishes."""
+        self._worker._asr = engine
+        self._sync_speaker_verifier()
+        self._refresh_readiness()
+
+    def _refresh_readiness(self) -> None:
+        issue = self._worker.readiness_issue()
+        self._tray.setToolTip(issue[1] if issue else self._microphone_error or tr("tray.ready"))
+        if not issue and not self._microphone_error and not self._reported_ready:
+            self._reported_ready = True
+            logger.info("[startup] model_ready")
+
+    def _check_microphone(self) -> None:
+        try:
+            self._recorder.check_device()
+            self._microphone_error = ""
+        except Exception as exc:
+            logger.warning("Selected microphone unavailable: %s", exc)
+            self._microphone_error = tr("worker.recording_failed")
 
     # ---- State handling ----
 
     @Slot(str, str)
     def _on_state_changed(self, state: str, text: str) -> None:
+        if state == STATE_LOADING:
+            issue = self._worker.readiness_issue()
+            if issue is None:
+                self._refresh_readiness()
+                return
+            state, text = issue
         self._overlay.set_state(state, text)
         if state == STATE_RECORDING:
+            self._microphone_error = ""
             self._tray.setToolTip(tr("tray.recording"))
         elif state == STATE_RECOGNIZING:
             self._tray.setToolTip(tr("tray.recognizing"))
+        elif state in (STATE_LOADING, STATE_FILTERED, STATE_ERROR):
+            if state == STATE_ERROR and text == tr("worker.recording_failed"):
+                self._microphone_error = text
+            self._tray.setToolTip(text)
         else:
-            self._tray.setToolTip(tr("tray.ready"))
+            self._refresh_readiness()
 
     # ---- Icons ----
 
@@ -463,6 +566,7 @@ class MoShengApp:
         self._recorder.device = self._settings.get(
             "audio", "input_device", default=None
         )
+        self._check_microphone()
         progressive = self._settings.get("hotkey", "progressive", default=False)
         self._worker.progressive = progressive
         self._worker.silence_duration = self._settings.get(
@@ -481,21 +585,8 @@ class MoShengApp:
 
         self._sound_player.style = self._settings.get("output", "sound_style", default="bell")
 
-        # Speaker verification: lazy load/unload on toggle change
-        sv_enabled = self._settings.get("speaker_verification", "enabled", default=False)
-        if sv_enabled and self._speaker_verifier is None:
-            self._load_speaker_verifier()
-        elif not sv_enabled and self._speaker_verifier is not None:
-            self._speaker_verifier.unload_model()
-            self._speaker_verifier = None
-            self._worker.speaker_verifier = None
-            logger.info("Speaker verifier unloaded (disabled)")
-        if self._speaker_verifier is not None:
-            self._speaker_verifier.update_thresholds(
-                self._settings.get("speaker_verification", "threshold", default=0.25),
-                self._settings.get("speaker_verification", "high_threshold", default=0.40),
-                self._settings.get("speaker_verification", "low_threshold", default=0.10),
-            )
+        self._sync_speaker_verifier()
+        self._refresh_readiness()
         self._worker.text_processor.update(
             remove_fillers=self._settings.get("text_processing", "remove_fillers", default=True),
             smart_punctuation=self._settings.get("text_processing", "smart_punctuation", default=True),
@@ -550,26 +641,45 @@ class MoShengApp:
         self._vad = vad
         self._worker._vad = vad
 
-    def _load_speaker_verifier(self) -> None:
-        from config import SPEAKER_DIR
-        from core.speaker_verifier import SpeakerVerifier
+    def _sync_speaker_verifier(self) -> None:
+        self._worker.verifier_error = ""
+        if not self._settings.get("speaker_verification", "enabled", default=False):
+            # An in-flight verification keeps its local reference until it finishes.
+            self._worker.speaker_verifier = self._speaker_verifier = None
+        elif self._speaker_verifier is not None:
+            self._apply_enrollment()
+        elif self._worker._asr is not None and self._verifier_loader is None:
+            self._verifier_loader = SpeakerLoader(self._settings)
+            self._verifier_loader.finished.connect(self._on_verifier_loaded)
+            self._verifier_loader.start()
 
-        device_setting = self._settings.get("asr", "device", default="auto")
-        if device_setting in ("auto", "cuda:0"):
-            import torch
-            if sys.platform == "darwin":
-                device = "mps" if torch.backends.mps.is_available() else "cpu"
+    @Slot()
+    def _on_verifier_loaded(self) -> None:
+        verifier = self._verifier_loader.verifier
+        self._verifier_loader = None
+        if self._settings.get("speaker_verification", "enabled", default=False):
+            self._speaker_verifier = verifier
+            if verifier is None:
+                self._worker.verifier_error = tr("worker.verifier_load_failed")
             else:
-                device = "cuda:0" if torch.cuda.is_available() else "cpu"
-        else:
-            device = device_setting
-        verifier = SpeakerVerifier(device=device)
-        verifier.load_model()
-        verifier.load_enrollment(SPEAKER_DIR)
+                self._apply_enrollment()
+        self._refresh_readiness()
 
-        self._speaker_verifier = verifier
-        self._worker.speaker_verifier = verifier
-        logger.info("Speaker verifier loaded on demand")
+    def _apply_enrollment(self) -> None:
+        from config import SPEAKER_DIR
+        verifier = self._speaker_verifier
+        try:
+            verifier.load_enrollment(SPEAKER_DIR)
+            verifier.update_thresholds(
+                self._settings.get("speaker_verification", "threshold", default=0.25),
+                self._settings.get("speaker_verification", "high_threshold", default=0.40),
+                self._settings.get("speaker_verification", "low_threshold", default=0.10),
+            )
+            self._worker.speaker_verifier = verifier
+        except Exception:
+            logger.exception("Could not read speaker enrollment")
+            self._worker.speaker_verifier = None
+            self._worker.verifier_error = tr("worker.enroll_first")
 
     def _build_hotword_context(self) -> str:
         enabled = self._settings.get("vocabulary", "enabled", default=True)
@@ -594,10 +704,15 @@ class MoShengApp:
     # ---- Shutdown ----
 
     def _quit(self) -> None:
+        QApplication.instance().quit()
+
+    @Slot()
+    def _shutdown(self) -> None:
         logger.info("Shutting down...")
-        self._worker.enqueue(CMD_QUIT)
-        self._worker.wait(5000)
         self._hotkey.stop()
+        self._worker.enqueue(CMD_QUIT)
+        self._worker.wait()
+        if self._verifier_loader is not None:
+            self._verifier_loader.wait()
         self._overlay.close()
         self._tray.hide()
-        QApplication.instance().quit()

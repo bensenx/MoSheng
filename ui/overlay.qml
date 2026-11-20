@@ -7,6 +7,7 @@ Item {
     property real amplitude: 0.0
     property real stateBrightness: 1.0
     property real stateHue: 0.0
+    property string statusMessage: ""
     // FFT frequency bands (5 aggregated from 8)
     property real b0: 0.0
     property real b1: 0.0
@@ -17,6 +18,7 @@ Item {
     // No background card — ShaderEffect renders directly with alpha
     ShaderEffect {
         anchors.fill: parent
+        anchors.bottomMargin: caption.visible ? caption.height : 0
 
         property real time: 0.0
         property real amplitude: root.amplitude
@@ -35,6 +37,28 @@ Item {
             to: 100000
             duration: 100000000  // ~27 hours, effectively infinite
             loops: Animation.Infinite
+        }
+    }
+
+    Rectangle {
+        id: caption
+        visible: root.statusMessage.length > 0
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        width: Math.min(parent.width, label.implicitWidth + 24)
+        height: label.height + 10
+        radius: 8
+        color: "#e6222831"
+        Text {
+            id: label
+            anchors.centerIn: parent
+            width: Math.min(implicitWidth, root.width - 24)
+            text: root.statusMessage
+            textFormat: Text.PlainText
+            color: "white"
+            font.pixelSize: 13
+            wrapMode: Text.WordWrap
+            horizontalAlignment: Text.AlignHCenter
         }
     }
 }

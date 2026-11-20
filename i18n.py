@@ -47,6 +47,14 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
 
     # ---- ui/app.py (WorkerThread) ----
+    "splash.checking": {"en": "Checking the speech engine…", "zh": "正在检查识别引擎…"},
+    "splash.warming": {"en": "Preparing the first dictation…", "zh": "正在准备首次听写…"},
+    "worker.loading_verifier": {"en": "Loading speaker verification…", "zh": "正在加载声纹验证…"},
+    "worker.verifier_load_failed": {"en": "Speaker verification unavailable. Save Settings to retry.", "zh": "声纹验证不可用。保存设置以重试。"},
+    "worker.enroll_first": {"en": "Enroll your voice in Settings", "zh": "请先在设置中注册声纹"},
+    "worker.verification_failed": {"en": "Speaker verification failed", "zh": "声纹验证失败"},
+    "worker.recording_failed": {"en": "Recording failed. Check your microphone and try again.", "zh": "录音失败，请检查麦克风后重试。"},
+    "worker.insertion_failed": {"en": "Could not paste the transcription", "zh": "无法粘贴识别结果"},
     "worker.no_content": {
         "zh": "未识别到内容",
         "en": "No content recognized",
@@ -72,6 +80,10 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     "tray.recognizing": {
         "zh": "MoSheng - 识别中",
         "en": "MoSheng - Recognizing",
+    },
+    "tray.loading": {
+        "zh": "MoSheng - 模型加载中",
+        "en": "MoSheng - Loading model",
     },
     "tray.settings": {
         "zh": "设置",
@@ -160,13 +172,14 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.progressive_input": {
         "zh": "渐进式输入（停顿时自动输入已识别文本）",
-        "en": "Progressive input (auto-type on pause)",
+        "en": "Type on pauses",
     },
     "settings.silence_duration": {
         "zh": "静音时长(秒)",
         "en": "Silence Duration (s)",
     },
     # -- ASR section --
+    "settings.model_device_hint": {"en": "Model and device changes take effect after restart.", "zh": "更改模型或推理设备后需重启应用。"},
     "settings.asr_section": {
         "zh": "语音识别",
         "en": "Speech Recognition",
@@ -252,11 +265,11 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.overlay_toggle": {
         "zh": "显示悬浮状态窗口",
-        "en": "Show floating status overlay",
+        "en": "Show status overlay",
     },
     "settings.restore_clipboard": {
         "zh": "粘贴后恢复剪贴板",
-        "en": "Restore clipboard after paste",
+        "en": "Restore clipboard",
     },
     # -- Vocabulary section --
     "settings.vocab_section": {
@@ -265,7 +278,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.vocab_toggle": {
         "zh": "启用生词辅助识别",
-        "en": "Enable vocabulary-assisted recognition",
+        "en": "Use custom vocabulary",
     },
     "settings.vocab_hint": {
         "zh": "在 CSV 文件中添加专业术语、人名等，每行一个词汇",
@@ -371,12 +384,13 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.remove_fillers": {
         "zh": "去除语气词（嗯、啊、um、uh…）",
-        "en": "Remove filler words (嗯, 啊, um, uh…)",
+        "en": "Remove filler words",
     },
     "settings.smart_punctuation": {
-        "zh": "智能标点（分句自动转逗号，末句保留句号）",
-        "en": "Smart punctuation (commas between clauses, period at end)",
+        "zh": "智能标点",
+        "en": "Smart punctuation",
     },
+    "settings.smart_punct_hint": {"en": "During progressive input, pauses separate clauses and the last sentence keeps its period.", "zh": "渐进式输入时，分句之间使用逗号，末句保留句号。"},
 
     # ---- core/speaker_verifier.py ----
     "verifier.model_not_loaded": {

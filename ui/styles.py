@@ -6,10 +6,10 @@ import sys
 
 from PySide6.QtCore import (
     Property, QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF,
-    QSize, Qt, Signal,
+    QSize, Qt,
 )
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QGroupBox, QWidget
+from PySide6.QtWidgets import QCheckBox, QGroupBox, QWidget
 
 if sys.platform == "win32":
     import ctypes
@@ -342,10 +342,8 @@ QMenu::separator {{
 # ToggleSwitch custom widget
 # ---------------------------------------------------------------------------
 
-class ToggleSwitch(QWidget):
+class ToggleSwitch(QCheckBox):
     """A glassmorphism-style toggle switch with smooth animation."""
-
-    toggled = Signal(bool)
 
     TRACK_WIDTH = 44
     TRACK_HEIGHT = 24
@@ -353,14 +351,15 @@ class ToggleSwitch(QWidget):
     KNOB_MARGIN = 4
 
     def __init__(self, text: str = "", checked: bool = False, parent: QWidget | None = None):
-        super().__init__(parent)
-        self._checked = checked
-        self._label_text = text
+        super().__init__(text, parent)
+        self.setChecked(checked)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._knob_pos = 1.0 if checked else 0.0
 
         self._animation = QPropertyAnimation(self, b"knobPos", self)
         self._animation.setDuration(200)
         self._animation.setEasingCurve(QEasingCurve.Type.InOutQuad)
+        self.toggled.connect(self._animate_toggle)
 
         self.setFixedHeight(32)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -374,27 +373,18 @@ class ToggleSwitch(QWidget):
 
     knobPos = Property(float, _get_knob_pos, _set_knob_pos)
 
-    def isChecked(self) -> bool:
-        return self._checked
-
-    def setChecked(self, checked: bool) -> None:
-        if self._checked == checked:
-            return
-        self._checked = checked
-        self._knob_pos = 1.0 if checked else 0.0
-        self.update()
-
-    def mousePressEvent(self, event) -> None:
-        self._checked = not self._checked
+    def _animate_toggle(self, checked: bool) -> None:
         self._animation.stop()
         self._animation.setStartValue(self._knob_pos)
-        self._animation.setEndValue(1.0 if self._checked else 0.0)
+        self._animation.setEndValue(1.0 if checked else 0.0)
         self._animation.start()
-        self.toggled.emit(self._checked)
+
+    def hitButton(self, point) -> bool:
+        return self.rect().contains(point)
 
     def sizeHint(self) -> QSize:
         fm = self.fontMetrics()
-        text_w = fm.horizontalAdvance(self._label_text) if self._label_text else 0
+        text_w = fm.horizontalAdvance(self.text())
         total_w = self.TRACK_WIDTH + (12 + text_w if text_w else 0)
         return QSize(total_w, 32)
 
@@ -402,8 +392,8 @@ class ToggleSwitch(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        track_rect = QRect(0, (self.height() - self.TRACK_HEIGHT) // 2,
-                           self.TRACK_WIDTH, self.TRACK_HEIGHT)
+        track_rect = QRect(1, (self.height() - self.TRACK_HEIGHT) // 2,
+                           self.TRACK_WIDTH - 2, self.TRACK_HEIGHT)
         track_radius = self.TRACK_HEIGHT / 2
 
         if self._knob_pos > 0.5:
@@ -415,7 +405,7 @@ class ToggleSwitch(QWidget):
             track_border = QColor(255, 255, 255, 40)
 
         p.setBrush(track_color)
-        p.setPen(QPen(track_border, 1))
+        p.setPen(QPen(QColor(COLOR_TEXT), 2) if self.hasFocus() else QPen(track_border, 1))
         p.drawRoundedRect(track_rect, track_radius, track_radius)
 
         knob_y = self.height() // 2
@@ -431,12 +421,12 @@ class ToggleSwitch(QWidget):
         p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS),
                        self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)
 
-        if self._label_text:
+        if self.text():
             p.setPen(QColor(COLOR_TEXT))
             text_x = self.TRACK_WIDTH + 12
             p.drawText(text_x, 0, self.width() - text_x, self.height(),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-                       self._label_text)
+                       self.text())
 
         p.end()
 

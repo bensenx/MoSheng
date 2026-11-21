@@ -169,53 +169,114 @@ class CacheTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == "win32" and shutil.which("uv"), "Windows with uv")
 class InstallerTests(unittest.TestCase):
-    def test_failed_setup_then_success_and_second_launch(self):
+    def setUp(self):
         import launcher
-        root = Path(self.enterContext(tempfile.TemporaryDirectory())) / "MoSheng portable"
-        root.mkdir()
-        profile = root / "profile"
-        profile.mkdir()
-        env = dict(USERPROFILE=str(profile), UV_CACHE_DIR=str(root / "cache"),
-                   UV_PYTHON=sys._base_executable, UV_PYTHON_DOWNLOADS="never", UV_OFFLINE="1")
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())) / "MoSheng tests"
+        self.root.mkdir()
+        self.app = self.root / "Build one"
+        self.app.mkdir()
+        self.profile = self.root / "profile"
+        self.profile.mkdir()
+        env = dict(USERPROFILE=str(self.profile), LOCALAPPDATA=str(self.profile / "Local"),
+                   UV_CACHE_DIR=str(self.root / "cache"), UV_PYTHON=sys._base_executable,
+                   UV_PYTHON_DOWNLOADS="never", UV_OFFLINE="1")
         self.enterContext(patch.dict(os.environ, env))
+        self.variant = self.enterContext(patch.object(launcher, "dependency_variant", return_value="cpu"))
         source = Path(launcher.__file__).parent
-        for name in ("app_version.py", "_setup.cmd"):
-            shutil.copyfile(source / name, root / name)
-        (root / "mirror.env").write_text("UV_OFFLINE=1\n")
-        self.enterContext(patch.object(launcher, "get_app_dir", return_value=str(root)))
-        launched = self.enterContext(patch.object(launcher, "launch_app"))
-        alert = self.enterContext(patch.object(launcher, "fatal_msgbox"))
-        results = []
-
-        def run_hidden(cmd, cwd, creationflags):
-            result = subprocess.run(cmd, cwd=cwd, stdin=subprocess.DEVNULL, capture_output=True,
-                                    creationflags=subprocess.CREATE_NO_WINDOW, timeout=45)
-            results.append(result)
-            return result.returncode
-
-        self.enterContext(patch.object(launcher.subprocess, "call", side_effect=run_hidden))
-        launcher.main()
-        self.assertNotEqual(results[0].returncode, 0)
-        alert.assert_called_once()
-        launched.assert_not_called()
-        self.assertTrue(launcher.needs_setup(str(root)))
-
-        shutil.copyfile(shutil.which("uv"), root / "uv.exe")
-        configs = root / "configs"
+        shutil.copyfile(source / "_setup.cmd", self.app / "_setup.cmd")
+        shutil.copyfile(shutil.which("uv"), self.app / "uv.exe")
+        configs = self.app / "configs"
         configs.mkdir()
         project = '[project]\nname="fixture"\nversion="0.1.0"\nrequires-python=">=3.11"\ndependencies=[]\n'
-        (root / "pyproject.toml").write_text(project)
-        subprocess.run([root / "uv.exe", "lock", "--offline"], cwd=root, capture_output=True, check=True)
-        for target in ("cpu", "cuda"):
-            (configs / f"pyproject-{target}.toml").write_text(project)
-            shutil.copyfile(root / "uv.lock", configs / f"uv-{target}.lock")
-        launcher.main()
-        self.assertEqual(results[-1].returncode, 0, results[-1].stdout + results[-1].stderr)
-        marker = root / ".venv" / ".mosheng_version"
-        self.assertEqual(marker.read_text().strip(), launcher.CURRENT_VERSION)
-        self.assertFalse(launcher.needs_setup(str(root)))
-        launcher.main()
-        self.assertEqual(len(results), 2)
-        self.assertEqual(launched.call_count, 2)
-        marker.write_bytes(b"\xff")
-        self.assertTrue(launcher.needs_setup(str(root)))
+        (self.root / "pyproject.toml").write_text(project)
+        subprocess.run([self.app / "uv.exe", "lock", "--offline"], cwd=self.root, capture_output=True, check=True)
+        for variant in ("cpu", "cuda"):
+            (configs / f"pyproject-{variant}.toml").write_text(project)
+            shutil.copyfile(self.root / "uv.lock", configs / f"uv-{variant}.lock")
+        self.results = []
+
+        def run_hidden(cmd, cwd, env, creationflags):
+            result = subprocess.run(cmd, cwd=cwd, env=env, stdin=subprocess.DEVNULL, capture_output=True,
+                                    creationflags=subprocess.CREATE_NO_WINDOW, timeout=45)
+            self.results.append(result)
+            return result.returncode
+
+        self.console = self.enterContext(patch.object(launcher.subprocess, "call", side_effect=run_hidden))
+
+    def test_first_install_failure_retry_then_reuse_from_another_build(self):
+        import launcher
+        setup = self.app / "_setup.cmd"
+        valid = setup.read_bytes()
+        setup.write_text("@exit /b 1\n")
+        with self.assertRaises(OSError):
+            launcher.ensure_runtime(self.app)
+        self.assertFalse(launcher.is_ready(launcher.runtime_for(self.app, "cpu")))
+        setup.write_bytes(valid)
+        runtime = launcher.ensure_runtime(self.app)
+        self.assertTrue(launcher.is_ready(runtime))
+        self.assertEqual(len(self.results), 2)
+        self.assertTrue((self.profile / ".mosheng/settings.json").is_file())
+        build2 = self.root / "Build two"
+        shutil.copytree(self.app, build2)
+        (build2 / "app_version.py").write_text('APP_VERSION="2.0"')
+        (build2 / "main.py").write_text("print('updated')")
+        with patch.object(launcher.subprocess, "run", side_effect=AssertionError("unexpected sync")):
+            self.assertEqual(launcher.ensure_runtime(build2), runtime)
+        self.assertEqual(len(self.results), 2)
+        self.assertFalse((build2 / ".venv").exists())
+        with patch.object(launcher.subprocess, "Popen") as start:
+            launcher.launch_app(build2, runtime)
+        self.assertEqual(start.call_args.args[0], [str(runtime / ".venv/Scripts/pythonw.exe"), str(build2 / "main.py")])
+        self.assertEqual(start.call_args.kwargs["cwd"], build2)
+
+    def test_existing_user_offline_migration_and_dependency_change(self):
+        import launcher
+        settings = self.profile / ".mosheng/settings.json"
+        settings.parent.mkdir()
+        settings.write_text('{"asr":{"model_name":"existing"}}')
+        old = launcher.ensure_runtime(self.app)
+        lock = self.app / "configs/uv-cpu.lock"
+        contents = lock.read_bytes().replace(b"\r\n", b"\n")
+        lock.write_bytes(contents.replace(b"\n", b"\r\n"))
+        self.assertEqual(launcher.runtime_for(self.app, "cpu"), old)
+        lock.write_bytes(contents + b"\n# updated fixture lock\n")
+        updated = launcher.ensure_runtime(self.app)
+        self.assertNotEqual(updated, old)
+        self.assertTrue(launcher.is_ready(old))
+        self.assertTrue(launcher.is_ready(updated))
+        self.assertEqual(json.loads(settings.read_text())["asr"]["model_name"], "existing")
+        self.assertNotEqual(launcher.runtime_for(self.app, "cuda"), updated)
+        (updated / ".venv/Scripts/pythonw.exe").unlink()
+        self.assertFalse(launcher.is_ready(updated))
+        self.assertEqual(launcher.ensure_runtime(self.app), updated)
+        self.assertTrue(launcher.is_ready(updated))
+        self.console.assert_not_called()
+
+    def test_two_launchers_prepare_the_environment_once(self):
+        import launcher
+        settings = self.profile / ".mosheng/settings.json"
+        settings.parent.mkdir()
+        settings.write_text("{}")
+        # Run the real installer in two separate Windows processes. Record each uv sync.
+        script = """
+import os, sys, time
+from pathlib import Path
+from unittest.mock import patch
+import launcher
+app = Path(sys.argv[1])
+run = launcher.subprocess.run
+def observe(cmd, **kwargs):
+    if cmd[1] == 'sync':
+        (app / (str(os.getpid()) + '.sync')).touch()
+        time.sleep(0.3)
+    return run(cmd, **kwargs)
+with patch.object(launcher, 'dependency_variant', return_value='cpu'), patch.object(launcher.subprocess, 'run', observe):
+    print(launcher.ensure_runtime(app))
+"""
+        children = [subprocess.Popen([sys.executable, "-c", script, str(self.app)],
+                                     cwd=Path(launcher.__file__).parent, stdout=subprocess.PIPE,
+                                     stderr=subprocess.PIPE) for _ in range(2)]
+        for child in children:
+            _, stderr = child.communicate(timeout=30)
+            self.assertEqual(child.returncode, 0, stderr)
+        self.assertEqual(len(list(self.app.glob("*.sync"))), 1)

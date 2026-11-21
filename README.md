@@ -86,7 +86,7 @@ Powered by [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B). **Runs 100% 
 1. Download `MoSheng-vX.X.X-win64.zip` from [Releases](https://github.com/bensenx/MoSheng/releases)
 2. Extract to any directory
 3. Run `MoSheng.exe`
-4. First launch auto-installs Python environment and dependencies (~5 min)
+4. The first launch prepares a per-user runtime under `%LOCALAPPDATA%\MoSheng\runtimes`. Later builds with the same CPU or CUDA dependencies reuse it, even when extracted to a different folder. On upgrade from an older release, MoSheng first tries the local wheel cache.
 5. First launch downloads the ASR model (~3.4 GB)
 
 #### Option B: From Source
@@ -322,7 +322,7 @@ results/
 1. 从 [Releases](https://github.com/bensenx/MoSheng/releases) 下载最新的 `MoSheng-vX.X.X-win64.zip`
 2. 解压到任意目录
 3. 双击 `MoSheng.exe`
-4. 首次运行自动安装 Python 环境和依赖（需联网，约 5 分钟）
+4. 首次运行会在 `%LOCALAPPDATA%\MoSheng\runtimes` 中准备当前用户的运行环境。之后即使解压到新目录，依赖相同的 CPU 或 CUDA 版本也会直接复用该环境。从旧版升级时，程序会优先使用本地缓存的依赖包。
 5. 首次运行自动下载 ASR 模型（~3.4GB）
 
 #### 方式 B：源码运行

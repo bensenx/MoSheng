@@ -1,144 +1,56 @@
 @echo off
-setlocal EnableDelayedExpansion
+setlocal DisableDelayedExpansion
 cd /d "%~dp0"
-
-:: Log all output to file
-set "LOGFILE=_setup.log"
-> "%LOGFILE%" echo MoSheng setup started: %date% %time%
->> "%LOGFILE%" echo Working directory: %cd%
-
-echo ================================================
-echo   MoSheng - First-time Setup
-echo ================================================
-echo.
-
-:: ---- Mirror source selection ----
-set "_HAS_MIRROR=0"
-if exist "mirror.env" (
-    for /f "usebackq eol=# tokens=1,* delims==" %%a in ("mirror.env") do (
-        if not "%%a"=="" (
-            set "%%a=%%b"
-            set "_HAS_MIRROR=1"
-        )
-    )
+:: Manual invocation uses the same runtime selection and installation lock.
+if not defined MOSHENG_RUNTIME (
+    if not exist "MoSheng.exe" exit /b 1
+    start "" /wait "MoSheng.exe" --setup-only
+    if errorlevel 1 exit /b 1
+    exit /b 0
 )
 
-if "!_HAS_MIRROR!"=="0" (
-    echo Select download source:
-    echo   [1] International ^(default^)
-    echo   [2] China mainland mirror
-    echo.
-    choice /c 12 /t 15 /d 1 /m "Enter 1 or 2 (15s auto-select 1): "
-    if !ERRORLEVEL! EQU 2 (
-        > "mirror.env" echo UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
-        >>"mirror.env" echo HF_ENDPOINT=https://hf-mirror.com
-        set "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
-        set "HF_ENDPOINT=https://hf-mirror.com"
-        echo [*] Using China mainland mirror
-    ) else (
-        type nul > "mirror.env"
-        echo [*] Using international source
-    )
-    echo.
-)
+set "LOGFILE=%MOSHENG_HOME%\_setup.log"
+> "%LOGFILE%" echo MoSheng dependency setup started: %date% %time%
+:: A returning user's settings and model selection already exist.
+if exist "%USERPROFILE%\.mosheng\settings.json" goto :sync
+if exist "%MOSHENG_HOME%\mirror.env" goto :model
 
-:: ---- ASR model selection ----
+echo Select download source:
+echo   [1] International
+echo   [2] China mainland mirror
+choice /c 12 /t 15 /d 1 /m "Select a source (default 1):"
+if not errorlevel 2 goto :international
+if errorlevel 3 goto :international
+set "UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple"
+set "HF_ENDPOINT=https://hf-mirror.com"
+> "%MOSHENG_HOME%\mirror.env" echo UV_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+>>"%MOSHENG_HOME%\mirror.env" echo HF_ENDPOINT=https://hf-mirror.com
+goto :model
+
+:international
+type nul > "%MOSHENG_HOME%\mirror.env"
+
+:model
 echo Select ASR model:
-echo   [1] Qwen3-ASR-1.7B (default, ~4GB download, 6GB+ VRAM recommended)
-echo   [2] Qwen3-ASR-0.6B (compact, ~1.8GB download, 3GB+ VRAM recommended)
-echo.
-choice /c 12 /t 15 /d 1 /m "Enter 1 or 2 (15s auto-select 1): "
-if !ERRORLEVEL! EQU 2 (
-    set "MOSHENG_MODEL_ID=Qwen/Qwen3-ASR-0.6B"
-    set "MOSHENG_MODEL_NAME=Qwen3-ASR-0.6B"
-    echo [*] Selected: Qwen3-ASR-0.6B
-) else (
-    set "MOSHENG_MODEL_ID=Qwen/Qwen3-ASR-1.7B"
-    set "MOSHENG_MODEL_NAME=Qwen3-ASR-1.7B"
-    echo [*] Selected: Qwen3-ASR-1.7B
-)
-echo.
+echo   [1] Qwen3-ASR-1.7B (default)
+echo   [2] Qwen3-ASR-0.6B (compact)
+set "MOSHENG_MODEL_NAME=Qwen3-ASR-1.7B"
+choice /c 12 /t 15 /d 1 /m "Select a model (default 1):"
+if errorlevel 3 goto :sync
+if errorlevel 2 set "MOSHENG_MODEL_NAME=Qwen3-ASR-0.6B"
 
-:: ---- Check required files ----
-if not exist "uv.exe" (
-    echo [ERROR] uv.exe not found!
-    >> "%LOGFILE%" echo ERROR: uv.exe not found in %cd%
-    goto :fail
-)
-if not exist "configs\pyproject-cuda.toml" (
-    if not exist "configs\pyproject-cpu.toml" (
-        echo [ERROR] Config files not found!
-        >> "%LOGFILE%" echo ERROR: configs directory missing or empty
-        goto :fail
-    )
-)
-
-:: ---- GPU detection ----
-nvidia-smi >nul 2>&1
+:sync
+echo Preparing the shared MoSheng runtime. Compatible builds will reuse it.
+".\uv.exe" sync --project "%MOSHENG_RUNTIME%" --frozen --no-install-project --color never
 if errorlevel 1 (
-    echo [!] No NVIDIA GPU detected, installing CPU version
-    >> "%LOGFILE%" echo GPU: No CUDA, using CPU
-    copy /y "configs\pyproject-cpu.toml" "pyproject.toml" >nul
-    copy /y "configs\uv-cpu.lock" "uv.lock" >nul
-) else (
-    echo [+] NVIDIA GPU detected, installing CUDA version
-    >> "%LOGFILE%" echo GPU: CUDA detected
-    copy /y "configs\pyproject-cuda.toml" "pyproject.toml" >nul
-    copy /y "configs\uv-cuda.lock" "uv.lock" >nul
+    >> "%LOGFILE%" echo uv sync failed. See console output above.
+    pause
+    exit /b 1
 )
-
-:: Verify copy succeeded
-if not exist "pyproject.toml" (
-    echo [ERROR] Failed to create pyproject.toml!
-    >> "%LOGFILE%" echo ERROR: Failed to create pyproject.toml
-    goto :fail
-)
-
-echo.
-echo Installing dependencies (first run downloads ~2GB, please wait)...
-echo.
-
->> "%LOGFILE%" echo Running: uv sync
-.\uv.exe sync --color never
-if errorlevel 1 goto :uv_fail
->> "%LOGFILE%" echo uv sync completed successfully
-goto :uv_ok
-
-:uv_fail
->> "%LOGFILE%" echo FAILED: uv sync
-echo.
-echo ================================================
-echo   Install failed!
-echo   Please check your network connection.
-echo   Details saved to _setup.log
-echo ================================================
-goto :fail
-
-:uv_ok
-
-:: Write initial model selection to settings (only if no settings exist yet)
+if exist "%USERPROFILE%\.mosheng\settings.json" goto :done
 if not exist "%USERPROFILE%\.mosheng" mkdir "%USERPROFILE%\.mosheng"
-if not exist "%USERPROFILE%\.mosheng\settings.json" (
-    > "%USERPROFILE%\.mosheng\settings.json" echo {"asr":{"model_name":"!MOSHENG_MODEL_NAME!","model_id":"!MOSHENG_MODEL_ID!"}}
-    >> "%LOGFILE%" echo Model selection saved: !MOSHENG_MODEL_NAME!
-)
-
-:: Write version marker
-".venv\Scripts\python.exe" "app_version.py" > ".venv\.mosheng_version.tmp"
-if errorlevel 1 goto :fail
-move /y ".venv\.mosheng_version.tmp" ".venv\.mosheng_version" >nul
-if errorlevel 1 goto :fail
->> "%LOGFILE%" echo SUCCESS: setup completed
-
-echo.
-echo ================================================
-echo   Setup complete! Starting MoSheng...
-echo ================================================
-timeout /t 3 >nul
+> "%USERPROFILE%\.mosheng\settings.json" echo {"asr":{"model_name":"%MOSHENG_MODEL_NAME%","model_id":"Qwen/%MOSHENG_MODEL_NAME%"}}
+if errorlevel 1 exit /b 1
+:done
+>> "%LOGFILE%" echo Shared runtime prepared successfully.
 exit /b 0
-
-:fail
-echo.
-echo Press any key to exit...
-pause >nul
-exit /b 1

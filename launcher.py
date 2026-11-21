@@ -4,11 +4,16 @@ Windows: compiled to MoSheng.exe with PyInstaller, manages venv setup.
 macOS: simple launcher (the .app bundle uses a shell script instead).
 """
 
+from contextlib import contextmanager
+import hashlib
 import os
+from pathlib import Path
+import platform
+import shutil
 import subprocess
 import sys
+import time
 
-from app_version import APP_VERSION as CURRENT_VERSION
 
 
 def get_app_dir() -> str:
@@ -39,96 +44,141 @@ def fatal_msgbox(msg: str) -> None:
 if sys.platform == "win32":
     CREATE_NEW_CONSOLE = 0x00000010
 
-    def load_mirror_env(app_dir: str) -> None:
-        path = os.path.join(app_dir, "mirror.env")
-        if not os.path.isfile(path):
-            return
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, _, value = line.partition("=")
-                    key, value = key.strip(), value.strip()
-                    if key:
-                        os.environ[key] = value
+    def runtime_home() -> Path:
+        return Path(os.environ["LOCALAPPDATA"]) / "MoSheng"
 
-    def needs_setup(app_dir: str) -> bool:
-        venv_pythonw = os.path.join(app_dir, ".venv", "Scripts", "pythonw.exe")
-        version_marker = os.path.join(app_dir, ".venv", ".mosheng_version")
-        if not os.path.isfile(venv_pythonw):
-            return True
-        try:
-            with open(version_marker, encoding="utf-8") as f:
-                return f.read().strip() != CURRENT_VERSION
-        except (OSError, UnicodeError):
-            return True
-
-    def run_setup(app_dir: str) -> bool:
-        setup_script = os.path.join(app_dir, "_setup.cmd")
-        if not os.path.isfile(setup_script):
-            fatal_msgbox(f"找不到安装脚本：{setup_script}")
-            return False
-
-        wrapper = os.path.join(app_dir, "_run_setup.cmd")
-        with open(wrapper, "w", encoding="ascii", newline="") as f:
-            f.write("@echo off\r\n")
-            f.write('call "%~dp0_setup.cmd"\r\n')
-            f.write('set "setup_status=%errorlevel%"\r\n')
-            f.write('if not "%setup_status%"=="0" (\r\n')
-            f.write("    echo.\r\n")
-            f.write("    echo Setup failed. Press any key to close...\r\n")
-            f.write("    pause >nul\r\n")
-            f.write(")\r\n")
-            f.write("exit /b %setup_status%\r\n")
-
-        try:
-            ret = subprocess.call(
-                ["cmd", "/c", wrapper], cwd=app_dir,
-                creationflags=CREATE_NEW_CONSOLE,
-            )
-        finally:
+    def dependency_variant() -> str:
+        smi = shutil.which("nvidia-smi")
+        if smi:
             try:
-                os.remove(wrapper)
-            except OSError:
+                probe = subprocess.run([smi, "-L"], capture_output=True, timeout=5,
+                                       creationflags=subprocess.CREATE_NO_WINDOW)
+                if probe.returncode == 0 and b"GPU " in probe.stdout:
+                    return "cuda"
+            except (OSError, subprocess.TimeoutExpired):
                 pass
+        return "cpu"
 
-        if ret != 0:
-            log_path = os.path.join(app_dir, "_setup.log")
-            detail = ""
-            if os.path.isfile(log_path):
-                with open(log_path, encoding="utf-8", errors="replace") as f:
-                    detail = f.read().strip()[-500:]
-            if detail:
-                fatal_msgbox(f"安装失败（退出码 {ret}）:\n\n{detail}")
-            else:
-                fatal_msgbox(
-                    f"安装失败（退出码 {ret}）。\n\n"
-                    "请在 MoSheng 文件夹中手动运行 _setup.cmd 查看详细错误。"
-                )
-        return ret == 0
+    def runtime_for(app: Path, variant: str) -> Path:
+        digest = hashlib.sha256(platform.machine().lower().encode("ascii"))
+        for name in (f"pyproject-{variant}.toml", f"uv-{variant}.lock"):
+            data = (app / "configs" / name).read_bytes().replace(b"\r\n", b"\n")
+            digest.update(len(data).to_bytes(8, "big"))
+            digest.update(data)
+        return runtime_home() / "runtimes" / f"{variant}-{digest.hexdigest()[:20]}"
 
-    def launch_app(app_dir: str) -> None:
-        pythonw = os.path.join(app_dir, ".venv", "Scripts", "pythonw.exe")
-        main_py = os.path.join(app_dir, "main.py")
-        subprocess.Popen([pythonw, main_py], cwd=app_dir)
+    def is_ready(runtime: Path) -> bool:
+        try:
+            marked = (runtime / ".ready").read_bytes() == b"ok\n"
+        except OSError:
+            return False
+        return (marked and (runtime / ".venv/Scripts/pythonw.exe").is_file()
+                and (runtime / ".venv/Scripts/python.exe").is_file())
+
+    @contextmanager
+    def setup_lock(home: Path):
+        # Windows releases this byte-range lock if an installer exits unexpectedly.
+        import errno
+        import msvcrt
+        home.mkdir(parents=True, exist_ok=True)
+        with (home / "setup.lock").open("a+b") as lock:
+            lock.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as exc:
+                    if exc.errno != errno.EACCES:
+                        raise
+                    time.sleep(0.2)
+            try:
+                yield
+            finally:
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+
+    def launch_environment(app: Path) -> dict:
+        env = os.environ.copy()
+        for path in (runtime_home() / "mirror.env", app / "mirror.env"):
+            if path.is_file():
+                for line in path.read_text(encoding="utf-8-sig").splitlines():
+                    key, sep, value = line.strip().partition("=")
+                    if sep and key in ("UV_INDEX_URL", "HF_ENDPOINT"):
+                        env[key] = value.strip()
+        return env
+
+    def ensure_runtime(app: Path) -> Path:
+        variant = dependency_variant()
+        runtime = runtime_for(app, variant)
+        if is_ready(runtime):
+            return runtime
+        home = runtime_home()
+        with setup_lock(home):
+            if is_ready(runtime):
+                return runtime
+            runtime.mkdir(parents=True, exist_ok=True)
+            marker = runtime / ".ready"
+            marker.unlink(missing_ok=True)
+            shutil.copyfile(app / "configs" / f"pyproject-{variant}.toml", runtime / "pyproject.toml")
+            shutil.copyfile(app / "configs" / f"uv-{variant}.lock", runtime / "uv.lock")
+            if (app / "mirror.env").is_file() and not (home / "mirror.env").exists():
+                shutil.copyfile(app / "mirror.env", home / "mirror.env")
+            env = launch_environment(app)
+            env.update(UV_PROJECT_ENVIRONMENT=str(runtime / ".venv"), MOSHENG_RUNTIME=str(runtime),
+                       MOSHENG_HOME=str(home))
+            uv = app / "uv.exe"
+            if not uv.is_file():
+                raise OSError(f"Missing uv.exe in {app}")
+            venv = runtime / ".venv"
+            if venv.is_dir() and not all((venv / "Scripts" / name).is_file()
+                                         for name in ("python.exe", "pythonw.exe")):
+                # Repair the interpreter launchers in place, preserving installed wheels.
+                repair = subprocess.run([str(uv), "venv", "--allow-existing", str(venv)],
+                                        env=env, cwd=runtime, capture_output=True,
+                                        creationflags=subprocess.CREATE_NO_WINDOW)
+                if repair.returncode:
+                    raise OSError(repair.stderr.decode("utf-8", errors="replace"))
+            options = ["sync", "--project", str(runtime), "--frozen", "--no-install-project"]
+            configured = (Path(os.environ["USERPROFILE"]) / ".mosheng/settings.json").is_file()
+            # Existing installs can normally populate the shared runtime from uv's wheel cache.
+            # Only bring up a console if a download or first-time configuration is needed.
+            log = home / "_setup.log"
+            installed = False
+            if configured:
+                with log.open("wb") as output:
+                    installed = subprocess.run([str(uv), *options, "--offline"], env=env, cwd=app,
+                                               stdout=output, stderr=subprocess.STDOUT,
+                                               creationflags=subprocess.CREATE_NO_WINDOW).returncode == 0
+            if not installed:
+                code = subprocess.call(["cmd.exe", "/d", "/c", "_setup.cmd"], cwd=app,
+                                       env=env, creationflags=CREATE_NEW_CONSOLE)
+                if code:
+                    detail = log.read_text(encoding="utf-8", errors="replace")[-600:] if log.is_file() else ""
+                    raise OSError(f"Setup failed ({code}). {log}\n{detail}")
+            if not all((runtime / ".venv/Scripts" / name).is_file() for name in ("python.exe", "pythonw.exe")):
+                raise OSError(f"Setup did not create a Python runtime in {runtime}")
+            (runtime / ".ready.tmp").write_bytes(b"ok\n")
+            (runtime / ".ready.tmp").replace(marker)
+        return runtime
+
+    def launch_app(app: Path, runtime: Path) -> None:
+        pythonw = runtime / ".venv/Scripts/pythonw.exe"
+        subprocess.Popen([str(pythonw), str(app / "main.py")], cwd=app, env=launch_environment(app))
 
 
 def main() -> None:
     app_dir = get_app_dir()
 
     if sys.platform == "win32":
-        load_mirror_env(app_dir)
-        if needs_setup(app_dir):
-            if not run_setup(app_dir):
-                return
-            load_mirror_env(app_dir)
-        pythonw = os.path.join(app_dir, ".venv", "Scripts", "pythonw.exe")
-        if not os.path.isfile(pythonw):
-            fatal_msgbox("虚拟环境创建失败，请删除 .venv 文件夹后重试。")
-            return
-        launch_app(app_dir)
+        try:
+            app = Path(app_dir)
+            runtime = ensure_runtime(app)
+            if "--setup-only" not in sys.argv[1:]:
+                launch_app(app, runtime)
+        except (OSError, UnicodeError) as exc:
+            fatal_msgbox(str(exc))
+            if "--setup-only" in sys.argv[1:]:
+                raise SystemExit(1)
     else:
         # macOS / other: simple launch
         main_py = os.path.join(app_dir, "main.py")

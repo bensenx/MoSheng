@@ -4,6 +4,7 @@ import logging
 from typing import Callable
 
 import os
+import sys
 
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
@@ -296,6 +297,13 @@ class SettingsWindow(QDialog):
             checked=s.get("output", "overlay_enabled", default=True),
         )
         out_layout.addWidget(self._overlay_toggle)
+
+        if sys.platform == "win32":
+            self._mode_badge_toggle = ToggleSwitch(
+                tr("settings.input_mode_badge"),
+                checked=s.get("output", "input_mode_badge", default=True),
+            )
+            out_layout.addWidget(self._mode_badge_toggle)
 
         self._restore_toggle = ToggleSwitch(
             tr("settings.restore_clipboard"),
@@ -611,6 +619,8 @@ class SettingsWindow(QDialog):
 
             self._settings.set("output", "sound_style", self._sound_combo.currentData())
             self._settings.set("output", "overlay_enabled", self._overlay_toggle.isChecked())
+            if sys.platform == "win32":
+                self._settings.set("output", "input_mode_badge", self._mode_badge_toggle.isChecked())
             self._settings.set("output", "restore_clipboard", self._restore_toggle.isChecked())
 
             self._settings.set("vocabulary", "enabled", self._vocab_toggle.isChecked())

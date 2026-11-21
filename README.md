@@ -42,6 +42,7 @@ Powered by [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B). **Runs 100% 
 - 🎨 **GPU Shader Overlay** — real-time audio visualization with QML + GLSL fragment shader
 - 🪟 **Native UI** — dark theme with platform-native effects
 - 🌐 **Bilingual** — Chinese / English interface, auto-detected
+- **Windows keyboard mode** — A brief `中` or `EN` badge appears when the focused app’s input mode changes. It uses Windows directly, including the open and conversion modes reported by Chinese IMEs. The badge appears beside the native text caret or in the lower-right corner of that display. Toggle it in **Settings → Preferences → Show 中 / EN badge**.
 - 🚀 **Autostart** — one-click startup toggle
 - 📦 **One-click Install** — download, run, done
 
@@ -279,6 +280,7 @@ results/
 - 🎨 **GPU Shader 可视化** — QML + GLSL 实时音频频谱动画
 - 🪟 **原生 UI** — 深色主题，平台原生特效
 - 🌐 **中英双语** — 界面语言自动检测
+- **Windows 中英文输入提示** — 输入模式切换时，墨声直接读取当前窗口的输入法状态，在文本光标旁短暂显示 `中` 或 `EN`。应用未提供系统文本光标时，提示会显示在该屏幕的右下角。可在**设置 → 偏好 → 切换中英文输入时显示提示**中开关。
 - 🚀 **开机自启** — 一键开关
 - 📦 **一键安装** — 下载即用
 

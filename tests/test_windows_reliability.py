@@ -280,3 +280,47 @@ with patch.object(launcher, 'dependency_variant', return_value='cpu'), patch.obj
             _, stderr = child.communicate(timeout=30)
             self.assertEqual(child.returncode, 0, stderr)
         self.assertEqual(len(list(self.app.glob("*.sync"))), 1)
+
+
+@unittest.skipUnless(sys.platform == "win32", "Windows input method")
+class InputModeTests(unittest.TestCase):
+    def test_keyboard_layout_and_chinese_ime_submodes(self):
+        from core import windows_input_mode as ime
+        self.enterContext(patch.object(ime.win32process, "GetWindowThreadProcessId", return_value=(1, 1)))
+        layout = self.enterContext(patch.object(ime.win32api, "GetKeyboardLayout"))
+        window = self.enterContext(patch.object(ime.imm32, "ImmGetDefaultIMEWnd", return_value=10))
+        query = self.enterContext(patch.object(ime, "_ime_value"))
+        for hkl, values, expected in (
+            (0x0409, [], "EN"), (0x0809, [], "EN"), (0x0411, [], None),
+            (0x0804, [1, 1025], "中"), (0x0804, [1, 1024], "EN"),
+            (0x0404, [0], "EN"), (0x0804, [None], None), (0x0804, [1, None], None),
+        ):
+            with self.subTest(layout=hkl, values=values):
+                layout.return_value = hkl
+                query.side_effect = values
+                self.assertEqual(ime.window_mode(1), expected)
+        window.return_value = 0
+        self.assertIsNone(ime.window_mode(1))
+
+    def test_native_ime_message_accepts_zero_and_rejects_missing_window(self):
+        from core import windows_input_mode as ime
+        import win32gui
+        wc = win32gui.WNDCLASS()
+        wc.lpszClassName = "MoShengInputModeTest"
+        wc.hInstance = ime.win32api.GetModuleHandle(None)
+
+        def proc(hwnd, msg, command, data):
+            if msg == ime.WM_IME_CONTROL:
+                return 1025 if command == ime.IMC_GETCONVERSIONMODE else 0
+            return win32gui.DefWindowProc(hwnd, msg, command, data)
+
+        wc.lpfnWndProc = proc
+        atom = win32gui.RegisterClass(wc)
+        self.addCleanup(win32gui.UnregisterClass, wc.lpszClassName, wc.hInstance)
+        hwnd = win32gui.CreateWindow(atom, "", 0, 0, 0, 0, 0, 0, 0, wc.hInstance, None)
+        try:
+            self.assertEqual(ime._ime_value(hwnd, ime.IMC_GETOPENSTATUS), 0)
+            self.assertEqual(ime._ime_value(hwnd, ime.IMC_GETCONVERSIONMODE), 1025)
+        finally:
+            win32gui.DestroyWindow(hwnd)
+        self.assertIsNone(ime._ime_value(hwnd, ime.IMC_GETOPENSTATUS))

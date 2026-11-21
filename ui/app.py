@@ -426,6 +426,10 @@ class MoShengApp(QObject):
             enabled=settings.get("output", "overlay_enabled", default=True),
             recorder=self._recorder,
         )
+        self._mode_badge = None
+        if sys.platform == "win32":
+            from ui.input_mode_badge import InputModeBadge
+            self._mode_badge = InputModeBadge()
 
         # Worker thread
         self._worker = WorkerThread(
@@ -502,6 +506,8 @@ class MoShengApp(QObject):
         self._hotkey.start()
         self._worker.start()
         self._tray.show()
+        if self._mode_badge is not None:
+            self._mode_badge.set_enabled(self._settings.get("output", "input_mode_badge", default=True))
         QApplication.instance().aboutToQuit.connect(self._shutdown)
         logger.info("MoSheng tray and hotkeys active")
 
@@ -621,6 +627,8 @@ class MoShengApp(QObject):
         self._overlay.enabled = self._settings.get(
             "output", "overlay_enabled", default=True
         )
+        if self._mode_badge is not None:
+            self._mode_badge.set_enabled(self._settings.get("output", "input_mode_badge", default=True))
         self._recorder.device = self._settings.get(
             "audio", "input_device", default=None
         )
@@ -767,6 +775,8 @@ class MoShengApp(QObject):
     @Slot()
     def _shutdown(self) -> None:
         logger.info("Shutting down...")
+        if self._mode_badge is not None:
+            self._mode_badge.set_enabled(False)
         self._hotkey.stop()
         self._worker.shutdown()
         self._worker.wait()

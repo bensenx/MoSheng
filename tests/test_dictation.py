@@ -1,8 +1,10 @@
 """Recorder, dictation lifecycle, and bilingual Qt layout regressions."""
 
 import os
+import sys
 import tempfile
 import threading
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
@@ -414,14 +416,64 @@ class SettingsTests(unittest.TestCase):
             window._tabs.setCurrentIndex(2)
             self.assertIsNone(window._capture_target)
             self.assertEqual(btn.text(), "F8")
+            if sys.platform == "win32":
+                window._mode_badge_toggle.setChecked(False)
             window._on_save_click()
             save.assert_called_once()
+            if sys.platform == "win32":
+                self.assertFalse(settings.get("output", "input_mode_badge"))
             self.assertEqual(settings.get("hotkey", "push_to_talk")["keys"], ["f8"])
         finally:
             window.close()
 
 
 class OverlayTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows IME")
+    def test_input_mode_badge_transitions_and_disable(self):
+        from ui.input_mode_badge import InputModeBadge
+        from core.windows_input_mode import BadgeAnchor
+        badge = InputModeBadge()
+        anchor = BadgeAnchor(app.primaryScreen().name(), None)
+        state = [(1, "EN", None)]
+        read = threading.Event()
+
+        def sample():
+            read.set()
+            return state[0]
+
+        self.enterContext(patch("ui.input_mode_badge.focused_mode", side_effect=sample))
+        self.enterContext(patch("ui.input_mode_badge.badge_anchor", return_value=anchor))
+        try:
+            badge.set_enabled(True)
+            for focus, mode, visible in ((1, "EN", True), (1, "中", True),
+                                         (2, "中", False), (2, None, False)):
+                state[0] = (focus, mode, None)
+                read.clear()
+                self.assertTrue(read.wait(2))
+                # Let the sampling thread run between Qt event-loop iterations.
+                for _ in range(60):
+                    app.processEvents()
+                    if badge.isVisible() == visible and (not visible or badge.text() == mode):
+                        break
+                    time.sleep(0.02)
+                self.assertEqual(badge.isVisible(), visible)
+                if visible:
+                    self.assertEqual(badge.text(), mode)
+                    self.assertTrue(badge.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus)
+            screen = app.primaryScreen()
+            offset = (int(screen.geometry().width() * screen.devicePixelRatio()) - 1,
+                      int(screen.geometry().height() * screen.devicePixelRatio()) - 1)
+            badge.display("EN", BadgeAnchor(screen.name(), offset))
+            self.assertTrue(screen.availableGeometry().contains(badge.geometry()))
+            self.assertTrue(badge._expiry.isActive())
+            badge.set_enabled(False)
+            self.assertFalse(badge.isVisible())
+            self.assertIsNone(badge._watcher)
+            self.assertFalse(badge._expiry.isActive())
+        finally:
+            badge.set_enabled(False)
+            badge.close()
+
     def test_localized_statuses_and_hidden_meter(self):
         from i18n import set_language, tr
         from ui.overlay_window import OverlayWindow

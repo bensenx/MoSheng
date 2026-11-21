@@ -273,6 +273,10 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "zh": "显示悬浮状态窗口",
         "en": "Show status overlay",
     },
+    "settings.input_mode_badge": {
+        "zh": "切换中英文输入时显示提示",
+        "en": "Show 中 / EN badge",
+    },
     "settings.restore_clipboard": {
         "zh": "粘贴后恢复剪贴板",
         "en": "Restore clipboard",

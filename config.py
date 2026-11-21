@@ -94,6 +94,7 @@ DEFAULT_SETTINGS = {
     "output": {
         "sound_style": "bell",
         "overlay_enabled": True,
+        "input_mode_badge": True,
         "restore_clipboard": True,
     },
     "vocabulary": {

@@ -2,6 +2,8 @@
 
 from dataclasses import dataclass, field
 import logging
+import gc
+import time
 import threading
 import queue
 import sys
@@ -50,6 +52,7 @@ class WorkerThread(QThread):
     """Processes recording/ASR commands from a queue, emits state signals."""
 
     state_changed = Signal(str, str)  # (state, text)
+    drained = Signal()
 
     _MIN_SPEECH_BEFORE_FLUSH = 0.5   # seconds of speech required before allowing flush
     _MAX_SILENCE_FORCE_FLUSH = 3.0   # seconds of continuous silence to force-flush
@@ -69,6 +72,8 @@ class WorkerThread(QThread):
         self._latest_recording: Recording | None = None
         self._cmd_queue: queue.Queue[str] = queue.Queue()
         self._shutting_down = threading.Event()
+        self.pause_requested = threading.Event()
+        self._drain_pending = threading.Event()
         self._text_processor = TextProcessor(
             remove_fillers=settings.get("text_processing", "remove_fillers", default=True),
             smart_punctuation=settings.get("text_processing", "smart_punctuation", default=True),
@@ -123,6 +128,15 @@ class WorkerThread(QThread):
         self._shutting_down.set()
         self.enqueue(CMD_QUIT)
 
+    def request_pause(self) -> None:
+        self.pause_requested.set()
+        self._drain_pending.set()
+        self.enqueue("drain")  # Wake an idle worker; a live capture still accepts its stop key.
+
+    @property
+    def has_pending_audio(self):
+        return self._recorder.is_recording or bool(self._recordings.unfinished_tasks)
+
     def readiness_issue(self) -> tuple[str, str] | None:
         if self._asr is None or not self._asr.is_ready:
             return STATE_LOADING, tr("tray.loading")
@@ -145,7 +159,7 @@ class WorkerThread(QThread):
                 if cmd == CMD_QUIT:
                     break
                 try:
-                    if cmd == CMD_START and self._capture is None:
+                    if cmd == CMD_START and self._capture is None and not self.pause_requested.is_set():
                         self._handle_start()
                     elif cmd == CMD_STOP and self._capture is not None:
                         self._handle_stop()
@@ -153,6 +167,10 @@ class WorkerThread(QThread):
                     logger.exception("Recording session failed")
                     self._cancel_capture()
                     self.state_changed.emit(STATE_ERROR, tr("worker.recording_failed"))
+                if self._drain_pending.is_set() and self._capture is None:
+                    self._recordings.join()  # Includes final punctuation and clipboard restoration.
+                    self._drain_pending.clear()
+                    self.drained.emit()
         finally:
             self._cancel_capture()
             self._recordings.put(None)
@@ -267,6 +285,7 @@ class WorkerThread(QThread):
             finally:
                 # The UI keeps the latest recording for status. Release its model.
                 session.verifier = None
+                self._recordings.task_done()
 
     def _emit_for_session(self, session: Recording | None, state: str, text: str) -> None:
         if session is None or session is self._latest_recording:
@@ -375,14 +394,35 @@ class WorkerThread(QThread):
         return STATE_RESULT, text
 
 
+class ModelJob(QThread):
+    """Load or release dictation models away from the UI and keyboard hook."""
+
+    def __init__(self, operation):
+        super().__init__()
+        self.operation = operation
+        self.result = None
+        self.failed = False
+
+    def run(self):
+        try:
+            self.result = self.operation()
+        except Exception:
+            self.failed = True
+            logger.exception("Dictation model transition failed")
+
+
 class SpeakerLoader(QThread):
-    def __init__(self, settings):
+    def __init__(self, settings, host=None):
         super().__init__()
         self._settings = settings
+        self._host = host
         self.verifier = None
 
     def run(self):
         try:
+            if self._host is not None:
+                self.verifier = self._host.speaker_verifier()
+                return
             from core.speaker_verifier import SpeakerVerifier
             verifier = SpeakerVerifier(device=self._settings.asr_device())
             verifier.load_model()
@@ -395,9 +435,15 @@ class MoShengApp(QObject):
     """Main application: tray icon, overlay, worker thread, hotkey manager."""
 
     def __init__(self, asr_engine: ASRBase | None, settings: SettingsManager,
-                 speaker_verifier=None):
+                 speaker_verifier=None, resume_engine=None, prepare_resume=None):
         super().__init__()
         self._settings = settings
+        self._resume_engine = resume_engine
+        self._prepare_resume = prepare_resume
+        self._phase = "paused" if self._settings.get("dictation_paused", default=False) and resume_engine else "active"
+        self._model_job = None
+        self._resume_started = 0.0
+        self._resume_failed = False
         self._verifier_loader = None
         self._microphone_error = ""
         self._reported_ready = False
@@ -437,6 +483,7 @@ class MoShengApp(QObject):
             speaker_verifier=speaker_verifier,
         )
         self._worker._sound_player = self._sound_player
+        self._worker.drained.connect(self._release_models)
         self._worker.state_changed.connect(self._on_state_changed,
                                             Qt.ConnectionType.QueuedConnection)
         self._worker.hotword_context = self._build_hotword_context()
@@ -445,7 +492,7 @@ class MoShengApp(QObject):
 
         # Load VAD for progressive mode
         self._vad = None
-        if self._worker.progressive:
+        if self._worker.progressive and self._phase == "active":
             self._load_vad()
 
         # Dual hotkey manager
@@ -465,16 +512,20 @@ class MoShengApp(QObject):
         if sys.platform == "win32":
             self._injector.hotkey_vks = self._hotkey.hotkey_vks
 
-        # Application icon
-        self._app_icon = self._load_app_icon()
-
         # System tray
         self._tray = QSystemTrayIcon()
-        if self._app_icon:
-            self._tray.setIcon(self._app_icon)
+        tray_icon = self._load_tray_icon()
+        if tray_icon:
+            self._tray.setIcon(tray_icon)
         self._refresh_readiness()
 
         menu = QMenu()
+        self._pause_action = QAction(menu)
+        if resume_engine is not None:
+            menu.addAction(self._pause_action)
+            menu.addSeparator()
+        self._pause_action.triggered.connect(self._toggle_dictation)
+        menu.aboutToShow.connect(self._update_pause_action)
         settings_action = QAction(tr("tray.settings"), menu)
         settings_action.triggered.connect(self._open_settings)
         menu.addAction(settings_action)
@@ -484,15 +535,16 @@ class MoShengApp(QObject):
         menu.addAction(quit_action)
         self._tray.setContextMenu(menu)
         self._tray_menu = menu
+        self._settings_window = None
+        self._update_pause_action()
+        if sys.platform in ("win32", "darwin"):
+            self._tray.activated.connect(self._on_tray_activated)
 
         # macOS: Dock integration
         if sys.platform == "darwin":
-            self._tray.activated.connect(self._on_tray_activated)
             QApplication.instance().applicationStateChanged.connect(
                 self._on_app_state_changed
             )
-
-        self._settings_window = None
 
         # Periodic hook reinstall to recover from silent removal by Windows
         self._hook_health_timer = QTimer()
@@ -500,10 +552,13 @@ class MoShengApp(QObject):
         self._hook_health_timer.start(60_000)
 
     def start(self) -> None:
-        self._check_microphone()
-        self._sync_speaker_verifier()
+        if self._phase == "active":
+            self._check_microphone()
+            self._sync_speaker_verifier()
+            self._hotkey.start()
+        else:
+            self._worker.pause_requested.set()
         self._refresh_readiness()
-        self._hotkey.start()
         self._worker.start()
         self._tray.show()
         if self._mode_badge is not None:
@@ -514,6 +569,8 @@ class MoShengApp(QObject):
     # ---- Hotkey callbacks ----
 
     def _on_hotkey_start(self) -> None:
+        if self._phase != "active":
+            return
         issue = self._worker.readiness_issue()
         if issue:
             self._worker.state_changed.emit(*issue)
@@ -527,8 +584,130 @@ class MoShengApp(QObject):
         self._worker._asr = engine
         self._sync_speaker_verifier()
         self._refresh_readiness()
+        self._update_pause_action()
+
+    def _update_pause_action(self):
+        phase = self._phase
+        if phase == "active":
+            key = "pause_after" if self._worker.has_pending_audio else "pause_action"
+        elif phase == "paused":
+            key = "resume_action"
+        else:
+            key = phase
+        self._pause_action.setText(tr("tray." + key))
+        can_pause = (self._worker._asr is not None and self._verifier_loader is None
+                     and QApplication.activeModalWidget() in (None, self._settings_window))
+        self._pause_action.setEnabled(phase in ("paused", "retry", "release_retry") or
+                                      (phase == "active" and can_pause))
+
+    def _set_phase(self, phase):
+        self._phase = phase
+        self._update_pause_action()
+        self._refresh_readiness()
+        if self._settings_window is not None:
+            self._settings_window._enroll_btn.setEnabled(phase in ("active", "retry"))
+        logger.info("[dictation] %s", phase)
+
+    def _toggle_dictation(self):
+        if self._phase == "active":
+            self._update_pause_action()
+            if not self._pause_action.isEnabled():
+                return
+            self._settings.set("dictation_paused", True)
+            self._settings.save()
+            self._resume_failed = False
+            self._set_phase("draining")
+            self._worker.request_pause()
+            if not self._recorder.is_recording and not self._hotkey.is_active:
+                self._hotkey.stop()
+        elif self._phase == "release_retry":
+            self._release_models()
+        elif self._phase in ("paused", "retry"):
+            self._resume_started = time.perf_counter()
+            self._resume_failed = False
+            self._set_phase("resuming")
+            self._run_model_job(self._resume_engine)
+
+    def _run_model_job(self, operation):
+        self._model_job = ModelJob(operation)
+        self._model_job.finished.connect(self._model_job_finished)
+        self._model_job.start()
+
+    def _release_models(self):
+        self._hotkey.stop()
+        self._set_phase("releasing")
+        engine, verifier = self._worker._asr, self._speaker_verifier
+
+        def release():
+            for model in (engine, verifier):
+                if model is not None:
+                    model.unload_model()
+            # Model wrappers can contain cycles. Release their CUDA blocks before
+            # announcing that the user can start a game.
+            gc.collect()
+            torch = sys.modules.get("torch")
+            if torch is not None and torch.cuda.is_initialized():
+                torch.cuda.empty_cache()
+
+        self._run_model_job(release)
+
+    @Slot()
+    def _model_job_finished(self):
+        job, self._model_job = self._model_job, None
+        job.deleteLater()
+        if self._phase == "releasing":
+            if job.failed:
+                self._set_phase("release_retry")
+                return
+            self._worker._asr = None
+            self._worker.speaker_verifier = self._speaker_verifier = None
+            if not self._resume_failed and self._prepare_resume is not None:
+                try:
+                    self._prepare_resume()
+                except Exception:
+                    logger.warning("Could not prepare fast resume; cold resume available", exc_info=True)
+            self._set_phase("retry" if self._resume_failed else "paused")
+            return
+        if job.failed:
+            self._resume_failed = True
+            self._release_models()
+            return
+        self._worker._asr = job.result
+        self._check_microphone()
+        self._sync_speaker_verifier()
+        self._finish_resume()
+
+    def _finish_resume(self):
+        if self._phase != "resuming" or self._verifier_loader is not None:
+            return
+        issue = self._worker.readiness_issue()
+        if issue or self._microphone_error:
+            self._resume_failed = True
+            self._tray.showMessage("MoSheng", self._microphone_error or issue[1])
+            self._release_models()
+            return
+        try:
+            if self._worker.progressive and self._vad is None:
+                self._load_vad()
+            self._apply_bindings()
+            self._worker.pause_requested.clear()
+            self._hotkey.start()
+        except Exception:
+            logger.exception("Could not resume dictation")
+            self._worker.pause_requested.set()
+            self._resume_failed = True
+            self._release_models()
+            return
+        self._set_phase("active")
+        logger.info("[dictation] ready after %.3f s", time.perf_counter() - self._resume_started)
+        self._settings.set("dictation_paused", False)
+        self._settings.save()
+        self._tray.showMessage("MoSheng", tr("tray.resumed"))
 
     def _refresh_readiness(self) -> None:
+        if self._phase != "active":
+            self._tray.setToolTip(tr("tray." + self._phase))
+            return
         issue = self._worker.readiness_issue()
         self._tray.setToolTip(issue[1] if issue else self._microphone_error or tr("tray.ready"))
         if not issue and not self._microphone_error and not self._reported_ready:
@@ -547,6 +726,13 @@ class MoShengApp(QObject):
 
     @Slot(str, str)
     def _on_state_changed(self, state: str, text: str) -> None:
+        self._update_pause_action()
+        if self._phase != "active":
+            if self._phase == "draining":
+                self._overlay.set_state(state, text)
+                if state == STATE_RECOGNIZING:
+                    self._hotkey.stop()
+            return
         if state == STATE_LOADING:
             issue = self._worker.readiness_issue()
             if issue is None:
@@ -568,20 +754,23 @@ class MoShengApp(QObject):
 
     # ---- Icons ----
 
-    def _load_app_icon(self) -> QIcon | None:
-        exts = ("icns", "png") if sys.platform == "darwin" else ("ico", "png")
-        for ext in exts:
-            path = os.path.join(ASSETS_DIR, f"icon.{ext}")
+    def _load_tray_icon(self) -> QIcon | None:
+        names = ("icon.icns", "icon.png") if sys.platform == "darwin" else ("icon.ico", "icon.png")
+        if sys.platform == "win32":
+            names = ("tray-microphone.svg", *names)
+        for name in names:
+            path = os.path.join(ASSETS_DIR, name)
             if os.path.isfile(path):
                 icon = QIcon(path)
                 if not icon.isNull():
                     return icon
         return None
 
-    # ---- macOS Dock integration ----
+    # ---- Tray and Dock activation ----
 
     def _on_tray_activated(self, reason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+        activation = QSystemTrayIcon.ActivationReason
+        if reason == (activation.DoubleClick if sys.platform == "win32" else activation.Trigger):
             self._open_settings()
 
     def _on_app_state_changed(self, state) -> None:
@@ -593,22 +782,22 @@ class MoShengApp(QObject):
     # ---- Settings ----
 
     def _open_settings(self) -> None:
-        if self._settings_window is not None:
-            try:
-                self._settings_window.raise_()
-                self._settings_window.activateWindow()
-                return
-            except RuntimeError:
-                self._settings_window = None
+        if self._settings_window is None:
+            from ui.settings_window import SettingsWindow
+            self._settings_window = SettingsWindow(self._settings, on_save=self._apply_settings)
+            self._settings_window._enroll_btn.setEnabled(self._phase in ("active", "retry"))
+            self._settings_window.finished.connect(self._settings_closed)
+        window = self._settings_window
+        if window.isMinimized():
+            window.setWindowState(window.windowState() & ~Qt.WindowState.WindowMinimized)
+        window.show()
+        window.raise_()
+        window.activateWindow()
 
-        from ui.settings_window import SettingsWindow
-        self._settings_window = SettingsWindow(
-            self._settings,
-            on_save=self._apply_settings,
-        )
-        self._settings_window.show()
+    def _settings_closed(self) -> None:
+        self._settings_window = None
 
-    def _apply_settings(self) -> None:
+    def _apply_bindings(self) -> None:
         ptt = self._settings.get("hotkey", "push_to_talk", default={})
         toggle = self._settings.get("hotkey", "toggle", default={})
         self._hotkey.update_bindings(
@@ -621,6 +810,10 @@ class MoShengApp(QObject):
         if sys.platform == "win32":
             self._injector.hotkey_vks = self._hotkey.hotkey_vks
 
+    def _apply_settings(self) -> None:
+        # Preserve the stop binding of an in-progress recording until it drains.
+        if self._phase != "draining":
+            self._apply_bindings()
         self._injector.restore_clipboard = self._settings.get(
             "output", "restore_clipboard", default=True
         )
@@ -640,7 +833,7 @@ class MoShengApp(QObject):
         )
 
         # Load/unload VAD on progressive toggle
-        if progressive and self._vad is None:
+        if progressive and self._vad is None and self._phase == "active":
             self._load_vad()
         elif not progressive and self._vad is not None:
             # An active capture keeps its own reference until it stops.
@@ -708,6 +901,8 @@ class MoShengApp(QObject):
         self._worker._vad = vad
 
     def _sync_speaker_verifier(self) -> None:
+        if self._phase not in ("active", "resuming"):
+            return
         self._worker.verifier_error = ""
         if not self._settings.get("speaker_verification", "enabled", default=False):
             # An in-flight verification keeps its local reference until it finishes.
@@ -715,7 +910,9 @@ class MoShengApp(QObject):
         elif self._speaker_verifier is not None:
             self._apply_enrollment()
         elif self._worker._asr is not None and self._verifier_loader is None:
-            self._verifier_loader = SpeakerLoader(self._settings)
+            from core.windows_model_host import WindowsModelHost
+            engine = self._worker._asr
+            self._verifier_loader = SpeakerLoader(self._settings, engine if isinstance(engine, WindowsModelHost) else None)
             self._verifier_loader.finished.connect(self._on_verifier_loaded)
             self._verifier_loader.start()
 
@@ -730,6 +927,8 @@ class MoShengApp(QObject):
             else:
                 self._apply_enrollment()
         self._refresh_readiness()
+        self._finish_resume()
+        self._update_pause_action()
 
     def _apply_enrollment(self) -> None:
         from config import SPEAKER_DIR
@@ -782,5 +981,9 @@ class MoShengApp(QObject):
         self._worker.wait()
         if self._verifier_loader is not None:
             self._verifier_loader.wait()
+        if self._model_job is not None:
+            self._model_job.wait()
+        if self._worker._asr is not None:
+            self._worker._asr.unload_model()
         self._overlay.close()
         self._tray.hide()

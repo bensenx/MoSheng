@@ -1,14 +1,13 @@
 """Prism palette, native widget styles, and shared interface artwork."""
 
 import os
-import math
 import sys
 
 from PySide6.QtCore import (
-    Property, QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF,
+    Property, QEasingCurve, QPropertyAnimation, QRect, QRectF,
     QSize, Qt,
 )
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QLabel, QWidget
 
 if sys.platform == "win32":
@@ -428,146 +427,17 @@ class ToggleSwitch(QCheckBox):
 
 
 # ---------------------------------------------------------------------------
-# App icon loader (high-DPI)
+# Settings section icons
 # ---------------------------------------------------------------------------
-
-def _screen_dpr() -> float:
-    from PySide6.QtWidgets import QApplication
-    app = QApplication.instance()
-    if app is not None:
-        screen = app.primaryScreen()
-        if screen is not None:
-            return max(screen.devicePixelRatio(), 2.0)
-    return 2.0
-
-
-# Section icons (QPainter line art)
-# ---------------------------------------------------------------------------
-
-def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> QPixmap:
-    dpr = _screen_dpr()
-    ps = round(size * dpr)
-    pixmap = QPixmap(ps, ps)
-    pixmap.setDevicePixelRatio(dpr)
-    pixmap.fill(QColor(0, 0, 0, 0))
-    p = QPainter(pixmap)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-    pen = QPen(QColor(color), 1.8)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-    p.setPen(pen)
-    p.setBrush(Qt.BrushStyle.NoBrush)
-
-    s = float(size)
-
-    if name == "keyboard":
-        p.drawRoundedRect(QRectF(1, 3, s - 2, s - 6), 2.5, 2.5)
-        ks = s * 0.16
-        for x in [s * 0.25, s * 0.5, s * 0.75]:
-            p.drawRoundedRect(QRectF(x - ks / 2, s * 0.38 - ks / 2, ks, ks), 0.8, 0.8)
-        p.drawLine(QPointF(s * 0.3, s * 0.68), QPointF(s * 0.7, s * 0.68))
-
-    elif name == "waveform":
-        heights = [0.3, 0.6, 1.0, 0.6, 0.3]
-        gap = s * 0.18
-        bar_w = s * 0.1
-        start_x = (s - (5 * bar_w + 4 * gap)) / 2
-        cy = s / 2
-        for i, h in enumerate(heights):
-            x = start_x + i * (bar_w + gap) + bar_w / 2
-            half_h = h * s * 0.38
-            p.drawLine(QPointF(x, cy - half_h), QPointF(x, cy + half_h))
-
-    elif name == "microphone":
-        cx = s / 2
-        cap_w = s * 0.35
-        cap_h = s * 0.45
-        p.drawRoundedRect(QRectF(cx - cap_w / 2, s * 0.05, cap_w, cap_h), cap_w / 2, cap_w / 2)
-        cradle_w = s * 0.55
-        cradle_h = s * 0.3
-        p.drawArc(QRectF(cx - cradle_w / 2, s * 0.28, cradle_w, cradle_h).toRect(), 0, -180 * 16)
-        p.drawLine(QPointF(cx, s * 0.73), QPointF(cx, s * 0.85))
-        p.drawLine(QPointF(cx - s * 0.18, s * 0.85), QPointF(cx + s * 0.18, s * 0.85))
-
-    elif name == "gear":
-        cx, cy = s / 2, s / 2
-        r_outer = s * 0.42
-        r_inner = s * 0.30
-        r_center = s * 0.15
-        teeth = 6
-        path = QPainterPath()
-        for i in range(teeth * 2):
-            angle = math.pi * i / teeth - math.pi / 2
-            r = r_outer if i % 2 == 0 else r_inner
-            x = cx + r * math.cos(angle)
-            y = cy + r * math.sin(angle)
-            if i == 0:
-                path.moveTo(x, y)
-            else:
-                path.lineTo(x, y)
-        path.closeSubpath()
-        p.drawPath(path)
-        p.drawEllipse(QPointF(cx, cy), r_center, r_center)
-
-    elif name == "book":
-        cx = s / 2
-        p.drawLine(QPointF(cx, s * 0.15), QPointF(cx, s * 0.85))
-        path_l = QPainterPath()
-        path_l.moveTo(cx, s * 0.15)
-        path_l.quadTo(s * 0.1, s * 0.15, s * 0.1, s * 0.25)
-        path_l.lineTo(s * 0.1, s * 0.75)
-        path_l.quadTo(s * 0.1, s * 0.85, cx, s * 0.85)
-        p.drawPath(path_l)
-        path_r = QPainterPath()
-        path_r.moveTo(cx, s * 0.15)
-        path_r.quadTo(s * 0.9, s * 0.15, s * 0.9, s * 0.25)
-        path_r.lineTo(s * 0.9, s * 0.75)
-        path_r.quadTo(s * 0.9, s * 0.85, cx, s * 0.85)
-        p.drawPath(path_r)
-
-    elif name == "shield":
-        cx = s / 2
-        path = QPainterPath()
-        path.moveTo(cx, s * 0.08)
-        path.lineTo(s * 0.88, s * 0.28)
-        path.quadTo(s * 0.88, s * 0.62, cx, s * 0.92)
-        path.quadTo(s * 0.12, s * 0.62, s * 0.12, s * 0.28)
-        path.closeSubpath()
-        p.drawPath(path)
-        p.drawLine(QPointF(cx - s * 0.15, s * 0.50), QPointF(cx - s * 0.02, s * 0.63))
-        p.drawLine(QPointF(cx - s * 0.02, s * 0.63), QPointF(cx + s * 0.18, s * 0.38))
-
-    elif name == "power":
-        cx = s / 2
-        r = s * 0.32
-        arc_rect = QRectF(cx - r, s * 0.5 - r, r * 2, r * 2)
-        start_angle = 60 * 16
-        span_angle = 240 * 16
-        p.drawArc(arc_rect.toRect(), start_angle, span_angle)
-        p.drawLine(QPointF(cx, s * 0.10), QPointF(cx, s * 0.45))
-
-    p.end()
-    return pixmap
-
-
-# ---------------------------------------------------------------------------
-# IconGroupBox: QGroupBox with a painted section icon
-# ---------------------------------------------------------------------------
-
-SECTION_COLORS = {"keyboard": COLOR_PINK, "shield": COLOR_RESULT, "waveform": COLOR_RESULT}
 
 class IconGroupBox(QGroupBox):
     def __init__(self, title: str, icon_name: str, parent: QWidget | None = None):
         super().__init__(title, parent)
-        self._icon_pixmap = draw_section_icon(icon_name, SECTION_COLORS.get(icon_name, COLOR_ACCENT), 18)
+        asset = "icon.ico" if icon_name == "microphone" else f"settings/{icon_name}.svg"
+        self._section_icon = QIcon(os.path.join(ASSETS_DIR, asset))
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        x = 17
-        y = 14
-        p.drawPixmap(x, y, self._icon_pixmap)
-        p.end()
+        painter = QPainter(self)
+        self._section_icon.paint(painter, QRect(15, 11, 21, 21))
+        painter.end()

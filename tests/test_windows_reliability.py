@@ -284,6 +284,30 @@ with patch.object(launcher, 'dependency_variant', return_value='cpu'), patch.obj
 
 @unittest.skipUnless(sys.platform == "win32", "Windows input method")
 class InputModeTests(unittest.TestCase):
+    def test_caret_uses_accessibility_for_missing_or_offscreen_native_point(self):
+        from unittest.mock import Mock
+        from core import windows_input_mode as ime
+
+        info = SimpleNamespace(hwndFocus=10, hwndActive=11, flags=0)
+        self.enterContext(patch.object(ime.win32gui, "GetWindowRect", return_value=(-300, 50, 0, 500)))
+        foreground = self.enterContext(patch.object(ime.win32gui, "GetForegroundWindow", return_value=11))
+        self.enterContext(patch.object(ime.win32api, "MonitorFromPoint", return_value=3))
+        self.enterContext(patch.object(ime.win32api, "GetMonitorInfo", return_value={
+            "Monitor": (-800, 0, 0, 600), "Device": "display2"}))
+        native = self.enterContext(patch.object(ime, "_caret_point", return_value=(-280, 90, 18)))
+        automation = Mock()
+        self.assertEqual(ime.badge_anchor(info, automation), ime.BadgeAnchor((-800, 0), (520, 90), 18))
+        automation.point.assert_not_called()
+        automation.point.return_value = (-100, 150, 22)
+        for unavailable in (None, (0, 0)):
+            native.return_value = unavailable
+            self.assertEqual(ime.badge_anchor(info, automation), ime.BadgeAnchor((-800, 0), (700, 150), 22))
+        foreground.return_value = 12
+        self.assertIsNone(ime.badge_anchor(info, automation))
+        foreground.return_value = 11
+        automation.point.return_value = None
+        self.assertIsNone(ime.badge_anchor(info, automation))
+
     def test_keyboard_layout_and_chinese_ime_submodes(self):
         from core import windows_input_mode as ime
         self.enterContext(patch.object(ime.win32process, "GetWindowThreadProcessId", return_value=(1, 1)))

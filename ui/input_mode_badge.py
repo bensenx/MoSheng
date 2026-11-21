@@ -1,12 +1,13 @@
-"""Transient, non-activating Windows keyboard-mode badge."""
+"""Click-through Windows input-mode indicator attached to the text caret."""
 
 from threading import Event
 
-from PySide6.QtCore import QThread, QTimer, Qt, Slot, Signal
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtCore import QRect, QThread, QTimer, Qt, Slot, Signal
+from PySide6.QtGui import QColor, QGuiApplication, QPainter
 from PySide6.QtWidgets import QLabel
 
-from core.windows_input_mode import BadgeAnchor, badge_anchor, focused_mode
+from core.windows_input_mode import BadgeAnchor, badge_anchor, focused_mode, user32
+from core.windows_uia_caret import AutomationCaret
 from ui.styles import COLOR_ACCENT, COLOR_BASE_SOLID, COLOR_RESULT
 
 
@@ -18,17 +19,16 @@ class ModeWatcher(QThread):
         self.stopped = Event()
 
     def run(self):
-        previous = candidate = (0, None)
-        while not self.stopped.is_set():
-            focus, mode, info = focused_mode()
-            current = focus, mode
-            # Let Windows finish switching IME contexts when focus changes.
-            if current == candidate and current != previous:
-                anchor = badge_anchor(info) if mode and mode != previous[1] else None
-                self.changed.emit(mode, anchor)
-                previous = current
-            candidate = current
-            self.stopped.wait(0.18)
+        previous = None
+        with AutomationCaret() as automation:
+            while not self.stopped.is_set():
+                focus, mode, info = focused_mode()
+                anchor = badge_anchor(info, automation) if mode else None
+                current = (focus, mode, anchor) if anchor else None
+                if current != previous:
+                    self.changed.emit(mode, anchor)
+                    previous = current
+                self.stopped.wait(0.12 if anchor else 0.28)
 
 
 class InputModeBadge(QLabel):
@@ -39,12 +39,12 @@ class InputModeBadge(QLabel):
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFixedSize(42, 28)
+        self._stem = QRect()
+        self._label = QRect()
         self._watcher = None
-        self._expiry = QTimer(self)
-        self._expiry.setSingleShot(True)
-        self._expiry.timeout.connect(self.hide)
+        self._lit = True
+        self._blink = QTimer(self)
+        self._blink.timeout.connect(self._toggle_stem)
 
     def set_enabled(self, enabled: bool):
         if enabled and self._watcher is None:
@@ -56,8 +56,7 @@ class InputModeBadge(QLabel):
             watcher.stopped.set()
             watcher.wait()
             watcher.deleteLater()
-            self._expiry.stop()
-            self.hide()
+            self.display(None, None)
 
     @Slot(object, object)
     def _mode_changed(self, mode: str | None, anchor: BadgeAnchor | None):
@@ -65,34 +64,61 @@ class InputModeBadge(QLabel):
             self.display(mode, anchor)
 
     def display(self, mode: str | None, anchor: BadgeAnchor | None):
-        self._expiry.stop()
-        if anchor is None or mode is None:
-            self.hide()
-            return
+        # Windows Qt keeps native monitor origins even at fractional scaling.
+        # Its screen name can be the monitor's model, while GDI uses DISPLAYn.
         screen = next((s for s in QGuiApplication.screens()
-                       if s.name().casefold() == anchor.screen.casefold()), None)
-        if screen is None:
-            screen = QGuiApplication.primaryScreen()
-            anchor = BadgeAnchor("", None)
-        if screen is None:
+                       if anchor and s.geometry().topLeft().toTuple() == anchor.monitor_origin), None)
+        if not mode or screen is None:
+            self._blink.stop()
             self.hide()
             return
+
         work = screen.availableGeometry()
-        if anchor.caret is None:
-            x = work.right() - self.width() - 18
-            y = work.bottom() - self.height() - 18
-        else:
-            origin = screen.geometry().topLeft()
-            x = origin.x() + round(anchor.caret[0] / screen.devicePixelRatio()) + 8
-            y = origin.y() + round(anchor.caret[1] / screen.devicePixelRatio()) + 6
-            if y + self.height() > work.bottom() + 1:
-                y -= self.height() + 28
-        self.move(max(work.left(), min(x, work.right() - self.width() + 1)),
-                  max(work.top(), min(y, work.bottom() - self.height() + 1)))
-        color = COLOR_ACCENT if mode == "中" else COLOR_RESULT
-        self.setStyleSheet(f"QLabel {{ background: {COLOR_BASE_SOLID}; color: {color}; "
-                           f"border: 1px solid {color}; border-radius: 9px; "
-                           "font-size: 14px; font-weight: 600; }")
+        origin = screen.geometry().topLeft()
+        scale = screen.devicePixelRatio()
+        x = origin.x() + round(anchor.caret[0] / scale)
+        bottom = origin.y() + round(anchor.caret[1] / scale)
+        height = max(2, min(28, round(anchor.height / scale)))
+        stem = QRect(x, bottom - height, 2, height)
+        label_x = max(work.left(), min(x + 3, work.right() - 24))
+        label_y = bottom + 2 if bottom + 19 <= work.bottom() + 1 else stem.top() - 19
+        label = QRect(label_x, max(work.top(), label_y), 25, 17)
+        bounds = stem.united(label).intersected(work)
+        if bounds.isEmpty():
+            self._blink.stop()
+            self.hide()
+            return
+        self._stem = stem.translated(-bounds.topLeft())
+        self._label = label.translated(-bounds.topLeft())
+        self.setGeometry(bounds)
         self.setText(mode)
+        self._lit = True
+        interval = user32.GetCaretBlinkTime()
+        if 0 < interval < 0xffffffff:  # INFINITE disables blinking in Windows.
+            self._blink.start(interval)
+        else:
+            self._blink.stop()
         self.show()
-        self._expiry.start(1100)
+        self.update()
+
+    def _toggle_stem(self):
+        self._lit = not self._lit
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        accent = QColor(COLOR_ACCENT if self.text() == "中" else COLOR_RESULT)
+        painter.setPen(Qt.PenStyle.NoPen)
+        if self._lit:
+            painter.setBrush(accent)
+            painter.drawRoundedRect(self._stem, 1, 1)
+        painter.setBrush(QColor(COLOR_BASE_SOLID))
+        painter.drawRoundedRect(self._label, 5, 5)
+        font = self.font()
+        font.setPixelSize(12)
+        font.setBold(True)
+        painter.setFont(font)
+        painter.setPen(accent)
+        painter.drawText(self._label, Qt.AlignmentFlag.AlignCenter, self.text())
+        painter.end()

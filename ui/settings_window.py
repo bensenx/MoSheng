@@ -1,6 +1,7 @@
 """Prism settings window for input, recognition and app preferences."""
 
 import logging
+from pathlib import Path
 from typing import Callable
 
 import os
@@ -9,7 +10,7 @@ import sys
 from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
-    QComboBox, QDialog, QMessageBox,
+    QApplication, QComboBox, QDialog, QMessageBox,
     QHBoxLayout, QLabel, QPushButton,
     QDoubleSpinBox, QScrollArea, QSpinBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget,
 )
@@ -63,6 +64,10 @@ class SettingsWindow(QDialog):
         self.setMaximumHeight(800)
         self.resize(self.minimumWidth(), 612)
         self._center_on_screen()
+        if sys.platform == "win32" and QApplication.platformName() == "windows":
+            from utils.windows_taskbar import TaskbarWindow
+            self.winId()  # Create the HWND before Explorer sees the settings window.
+            self._taskbar_window = TaskbarWindow(self.windowHandle(), Path(ASSETS_DIR).parent)
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -272,7 +277,7 @@ class SettingsWindow(QDialog):
         recognition_page.addWidget(sv_group)
 
         # --- Output Section ---
-        out_group = IconGroupBox(tr("settings.output_section"), "gear")
+        out_group = IconGroupBox(tr("settings.output_section"), "output")
         out_layout = QVBoxLayout(out_group)
         out_layout.setSpacing(16)
 
@@ -343,7 +348,7 @@ class SettingsWindow(QDialog):
         recognition_page.addWidget(vocab_group)
 
         # --- Text Processing Section ---
-        tp_group = IconGroupBox(tr("settings.text_processing_section"), "gear")
+        tp_group = IconGroupBox(tr("settings.text_processing_section"), "text")
         tp_layout = QVBoxLayout(tp_group)
         tp_layout.setSpacing(16)
         self._remove_fillers_toggle = ToggleSwitch(
@@ -362,7 +367,7 @@ class SettingsWindow(QDialog):
         tp_layout.addWidget(punct_hint)
         recognition_page.addWidget(tp_group)
 
-        general_group = IconGroupBox(tr("settings.general_section"), "gear")
+        general_group = IconGroupBox(tr("settings.general_section"), "general")
         general_layout = QVBoxLayout(general_group)
         lang_row = QHBoxLayout()
         lang_row.addWidget(QLabel(tr("settings.language_label")))
@@ -461,7 +466,6 @@ class SettingsWindow(QDialog):
                     devices.append("mps")
             else:
                 for i in range(torch.cuda.device_count()):
-                    torch.cuda.get_device_name(i)
                     devices.append(f"cuda:{i}")
         except Exception:
             pass

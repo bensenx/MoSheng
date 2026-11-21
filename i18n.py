@@ -12,6 +12,16 @@ SUPPORTED_LANGUAGES = {
 }
 
 _TRANSLATIONS: dict[str, dict[str, str]] = {
+    "tray.pause_action": {"zh": "暂停听写，释放显存", "en": "Pause dictation and free GPU memory"},
+    "tray.pause_after": {"zh": "本次听写完成后暂停", "en": "Pause after this dictation"},
+    "tray.draining": {"zh": "墨声 · 等待听写完成…", "en": "MoSheng · Finishing dictation…"},
+    "tray.releasing": {"zh": "墨声 · 正在释放显存…", "en": "MoSheng · Releasing GPU memory…"},
+    "tray.paused": {"zh": "墨声 · 听写已暂停，模型已卸载", "en": "MoSheng · Dictation paused, models unloaded"},
+    "tray.resume_action": {"zh": "恢复听写", "en": "Resume dictation"},
+    "tray.resuming": {"zh": "墨声 · 正在恢复听写…", "en": "MoSheng · Preparing dictation…"},
+    "tray.retry": {"zh": "重试恢复听写", "en": "Retry resuming dictation"},
+    "tray.release_retry": {"zh": "重试释放显存", "en": "Retry releasing GPU memory"},
+    "tray.resumed": {"zh": "听写已就绪", "en": "Dictation is ready"},
     # ---- main.py ----
     "error.title": {
         "zh": "MoSheng - 错误",
@@ -274,8 +284,8 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "en": "Show status overlay",
     },
     "settings.input_mode_badge": {
-        "zh": "切换中英文输入时显示提示",
-        "en": "Show 中 / EN badge",
+        "zh": "在输入光标旁显示中英文状态",
+        "en": "Show 中 / EN at cursor",
     },
     "settings.restore_clipboard": {
         "zh": "粘贴后恢复剪贴板",

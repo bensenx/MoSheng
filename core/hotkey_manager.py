@@ -218,6 +218,9 @@ class DualHotkeyManager:
             self._codes_pressed.clear()
             self._is_active = False
             self._active_mode = None
+            self._ptt_press_time = None
+            self._ptt_long_triggered = False
+            self._toggle_fired = False
         logger.info("DualHotkeyManager stopped")
 
     def reinstall_hook(self) -> None:

@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.4.0 (2026-11-21) · Windows
+
+- Pause dictation from the tray to release GPU memory while keeping the Chinese/English caret indicator active. Resume manually after a game.
+- On the tested RTX 5090 with Qwen3-ASR-1.7B, all three pauses released 5063.7 MiB of dedicated GPU memory. Median resume time fell from 13.22 to 5.19 seconds after background preparation. The idle helper used a 5.3 MiB working set and about 2.65 GiB of private commit.
+- Refresh the Prism interface, microphone icon, bilingual settings layout and Windows taskbar identity. Double-click the tray icon to open Settings.
+- Reuse the per-user Windows runtime across builds with matching dependencies. Improve dictation readiness, clipboard restoration and progressive recording buffer efficiency.
+
 ## v1.2.0 (2026-02-21)
 
 ### Features

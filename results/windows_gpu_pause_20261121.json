@@ -1,0 +1,14 @@
+{
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "model": "Qwen/Qwen3-ASR-1.7B",
+  "device": "cuda:0",
+  "dtype": "bfloat16",
+  "speaker_verification": false,
+  "memory_unit": "MiB",
+  "method": "Invoked the packaged app's Windows tray actions. Process memory is the median of three WDDM DedicatedUsage samples summed over the resident app and its Python descendants. Whole-GPU readings are separate nvidia-smi spot checks and include other applications. Resume uses the app's monotonic clock from the resume action through warmup, microphone check and hotkey reinstallation.",
+  "runs": [
+    {"before": 5063.7, "paused": 0.0, "resumed": 5063.7, "whole_gpu_before": 7094, "whole_gpu_paused": 2017, "whole_gpu_resumed": 6810, "resume_seconds": 13.216},
+    {"before": 5063.7, "paused": 0.0, "resumed": 5063.7, "whole_gpu_before": 6810, "whole_gpu_paused": 1747, "whole_gpu_resumed": 6856, "resume_seconds": 13.477},
+    {"before": 5063.7, "paused": 0.0, "resumed": 5063.7, "whole_gpu_before": 6944, "whole_gpu_paused": 1919, "whole_gpu_resumed": 6982, "resume_seconds": 12.226}
+  ]
+}

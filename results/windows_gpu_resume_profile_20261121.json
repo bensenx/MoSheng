@@ -1,0 +1,30 @@
+{
+  "gpu": "NVIDIA GeForce RTX 5090",
+  "model": "Qwen/Qwen3-ASR-1.7B",
+  "dtype": "bfloat16",
+  "speaker_verification": false,
+  "baseline_tray_measurement": "windows_gpu_pause_20261121.json",
+  "baseline_resume_median_s": 13.216,
+  "baseline_cold_probe_s": {
+    "method": "Single fresh interpreter using the packaged runtime and cached model. Artificial observation hold excluded. Stage measurements are independent of the tray runs.",
+    "interpreter": 0.075, "bootstrap": 0.104, "torch_import": 1.609,
+    "qwen_and_engine_import": 5.690, "snapshot_and_device_probe": 0.155,
+    "model_and_processor": 2.884, "warmup": 2.013, "first_speech": 0.459
+  },
+  "method": "Three real pause/resume cycles in the installed tray app after standby import completed. Ready runs from the resume action until microphone checks, inference warmup and shortcut reinstallation finish. GPU numbers are medians of three WDDM dedicated-memory samples for the resident app plus Python descendants. Working set and private commit are spot readings for the waiting child processes only. No game was running as part of the benchmark.",
+  "cold_resume_after_restarting_app_paused_s": 15.310,
+  "isolated_speech_checks": {
+    "method": "Packaged engine, separate test profile, real desktop app still loaded on the GPU. Time to engine warmup excludes desktop checks. Tested the same 2.82-second synthetic WAV twice.",
+    "immediate_resume_engine_ready_s": 12.644,
+    "immediate_first_speech_s": 0.413,
+    "prepared_resume_engine_ready_s": 8.212,
+    "prepared_warmup_s": 5.27,
+    "prepared_first_speech_s": 0.413,
+    "both_transcripts": "The microphone is ready for dictation."
+  },
+  "tray_runs": [
+    {"round": 1, "background_import_s": 7.697, "model_and_processor_s": 2.979, "warmup_s": 1.99, "ready_s": 5.054, "gpu_before_mib": 5063.7, "gpu_paused_mib": 0.0, "gpu_restored_mib": 5063.7, "standby_working_set_mib": 5.3, "standby_private_commit_mib": 2709.0},
+    {"round": 2, "background_import_s": 7.665, "model_and_processor_s": 3.062, "warmup_s": 2.05, "ready_s": 5.192, "gpu_before_mib": 5063.7, "gpu_paused_mib": 0.0, "gpu_restored_mib": 5063.7, "standby_working_set_mib": 5.2, "standby_private_commit_mib": 2707.9},
+    {"round": 3, "background_import_s": 7.711, "model_and_processor_s": 3.028, "warmup_s": 2.31, "ready_s": 5.426, "gpu_before_mib": 5063.7, "gpu_paused_mib": 0.0, "gpu_restored_mib": 5063.7, "standby_working_set_mib": 5.3, "standby_private_commit_mib": 2709.0}
+  ]
+}

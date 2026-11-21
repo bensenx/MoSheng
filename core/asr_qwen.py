@@ -33,9 +33,10 @@ class QwenASREngine(ASRBase):
     def load_model(self) -> None:
         """Load weights to GPU. Does NOT warm up — call warmup() separately."""
         logger.info("Loading Qwen3-ASR model: %s on %s", self._model_id, self._device)
-        t0 = time.time()
+        t0 = time.perf_counter()
 
         from qwen_asr import Qwen3ASRModel
+        imported = time.perf_counter()
         self._model = Qwen3ASRModel.from_pretrained(
             self._model_id,
             dtype=self._dtype,
@@ -43,8 +44,8 @@ class QwenASREngine(ASRBase):
             max_new_tokens=self._max_new_tokens,
         )
 
-        elapsed = time.time() - t0
-        logger.info("Model loaded in %.1fs", elapsed)
+        logger.info("Model loaded in %.3fs (Qwen import %.3fs, weights and processor %.3fs)",
+                    time.perf_counter() - t0, imported - t0, time.perf_counter() - imported)
 
     def warmup(self) -> None:
         """Run one silent-audio inference so the first real call avoids cuDNN autotune."""

@@ -84,7 +84,7 @@ Powered by [Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B). **Runs 100% 
 
 #### Option A: Distribution Package (Recommended)
 
-1. Download `MoSheng-vX.X.X-win64.zip` from [Releases](https://github.com/bensenx/MoSheng/releases)
+1. Download `MoSheng-vX.X.X-Windows.zip` from [Releases](https://github.com/bensenx/MoSheng/releases)
 2. Extract to any directory
 3. Run `MoSheng.exe`
 4. The first launch prepares a per-user runtime under `%LOCALAPPDATA%\MoSheng\runtimes`. Later builds with the same CPU or CUDA dependencies reuse it, even when extracted to a different folder. On upgrade from an older release, MoSheng first tries the local wheel cache.
@@ -208,6 +208,12 @@ hdiutil create -volname MoSheng -srcfolder dist/MoSheng.app -ov -format UDZO dis
 
 ## Changelog
 
+### v1.4.0 · Windows
+
+- Right-click the tray icon to pause dictation and free GPU memory. The Chinese/English caret indicator stays active. Choose **Resume dictation** after your game.
+- Prism adds a microphone tray icon and bilingual settings. Double-click the tray icon to open Settings.
+- Compatible builds reuse the per-user Python runtime. Progressive recording uses fewer audio-buffer copies.
+
 ### v1.3.0
 
 - **Silero VAD** — replaced RMS-based silence detection with [Silero VAD](https://github.com/snakers4/silero-vad) neural network for progressive input. No more per-mic threshold tuning; keyboard noise no longer triggers false positives.
@@ -321,7 +327,7 @@ results/
 
 #### 方式 A：下载分发包（推荐）
 
-1. 从 [Releases](https://github.com/bensenx/MoSheng/releases) 下载最新的 `MoSheng-vX.X.X-win64.zip`
+1. 从 [Releases](https://github.com/bensenx/MoSheng/releases) 下载最新的 `MoSheng-vX.X.X-Windows.zip`
 2. 解压到任意目录
 3. 双击 `MoSheng.exe`
 4. 首次运行会在 `%LOCALAPPDATA%\MoSheng\runtimes` 中准备当前用户的运行环境。之后即使解压到新目录，依赖相同的 CPU 或 CUDA 版本也会直接复用该环境。从旧版升级时，程序会优先使用本地缓存的依赖包。
@@ -405,6 +411,12 @@ uv run python main.py
 在 `~/.mosheng/vocabulary.csv` 中添加专业术语，每行一个，帮助提高识别率。
 
 ## 更新日志
+
+### v1.4.0 · Windows
+
+- 右键托盘图标可暂停听写并释放显存，中英文光标提示继续工作。游戏结束后，点击「恢复听写」即可。
+- Prism 界面更新了麦克风图标和双语设置，双击托盘图标即可打开设置。
+- 依赖相同的版本可复用本机运行环境，渐进听写减少了音频缓冲区的重复复制。
 
 ### v1.3.0
 

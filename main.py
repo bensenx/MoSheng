@@ -94,22 +94,30 @@ def check_environment() -> bool:
     return True
 
 
-def load_asr_engine(settings: SettingsManager, snapshot):
+def load_asr_engine(settings: SettingsManager, snapshot, standby=None):
     logger = logging.getLogger(__name__)
-    from core.asr_qwen import QwenASREngine
-
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-    device = settings.asr_device()
+    device = settings.get("asr", "device", default="auto")
+    if sys.platform == "win32" and device != "cpu":
+        from core.windows_model_host import WindowsModelHost as Engine
+    else:
+        if standby is not None:
+            standby.close()
+        from core.asr_qwen import QwenASREngine as Engine
+        device = settings.asr_device()
     dtype = settings.get("asr", "dtype", default="bfloat16")
     max_tokens = settings.get("asr", "max_new_tokens", default=256)
 
-    engine = QwenASREngine(
+    engine = Engine(
         model_id=str(snapshot), device=device,
         dtype=dtype, max_new_tokens=max_tokens,
     )
 
     logger.info("Loading ASR model: %s (device=%s) ...", model_id, device)
-    engine.load_model()
+    if standby is not None and sys.platform == "win32" and device != "cpu":
+        engine.load_model(standby=standby)
+    else:
+        engine.load_model()
     logger.info("ASR model loaded.")
     return engine
 
@@ -130,6 +138,9 @@ def main():
     from ui.styles import FLUENT_DARK_STYLESHEET
     from config import ASSETS_DIR
 
+    if sys.platform == "win32":
+        from utils.windows_taskbar import set_process_identity
+        set_process_identity()
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)
     qt_app.setStyleSheet(FLUENT_DARK_STYLESHEET)
@@ -147,16 +158,18 @@ def main():
     init_language(settings)
 
     from ui.splash_screen import SplashScreen
-    splash = SplashScreen()
-    splash.show()
-    qt_app.processEvents()
-    logger.info("[startup] splash_visible")
+    paused = sys.platform == "win32" and settings.get("dictation_paused", default=False)
+    if not paused:
+        splash = SplashScreen()
+        splash.show()
+        qt_app.processEvents()
+        logger.info("[startup] splash_visible")
 
     # ---- One-time model download (kept on main thread; has its own progress UI) ----
     from core.model_downloader import cached_snapshot, ModelDownloadThread
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-    snapshot = cached_snapshot(model_id)
-    if snapshot is None:
+    snapshot = None if paused else cached_snapshot(model_id)
+    if not paused and snapshot is None:
         model_name = settings.get("asr", "model_name", default="Qwen3-ASR-1.7B")
         splash.set_status(tr("splash.downloading_model", name=model_name))
         qt_app.processEvents()
@@ -183,9 +196,41 @@ def main():
 
     # ---- Bring up tray + hotkey IMMEDIATELY (no engine yet) ----
     from ui.app import MoShengApp
-    app = MoShengApp(asr_engine=None, settings=settings, speaker_verifier=None)
+    standby = None
+    if sys.platform == "win32":
+        from core.windows_model_host import WindowsModelStandby
+        standby = WindowsModelStandby()
+
+    def prepare_resume():
+        if standby is not None and settings.get("asr", "device", default="auto") != "cpu":
+            standby.prepare()
+
+    def resume_engine():
+        selected = settings.get("asr", "model_id", default=model_id)
+        local = cached_snapshot(selected)
+        if local is None:
+            downloader = ModelDownloadThread(selected)
+            downloader.run()
+            if downloader.snapshot is None:
+                raise RuntimeError(downloader.failure)
+            local = downloader.snapshot
+        engine = load_asr_engine(settings, local, standby)
+        try:
+            engine.warmup()
+        except Exception:
+            engine.unload_model()
+            raise
+        return engine
+
+    app = MoShengApp(asr_engine=None, settings=settings,
+                    resume_engine=resume_engine if sys.platform == "win32" else None,
+                    prepare_resume=prepare_resume)
     app.start()
+    if standby is not None:
+        qt_app.aboutToQuit.connect(standby.close)
     logger.info("[startup] tray_active")
+    if paused:
+        return qt_app.exec()
 
     splash.set_status(tr("tray.loading"))
     splash.set_hint(tr("splash.loading_asr_hint"))
@@ -205,14 +250,19 @@ def main():
         def run(self):
             try:
                 self.stage.emit(tr("splash.checking"))
-                if not check_environment():
+                # GPU discovery for the Windows host belongs in the child process.
+                if sys.platform != "win32" and not check_environment():
                     self.failed.emit()
                     return
 
                 self.stage.emit(tr("tray.loading"))
                 engine = load_asr_engine(self._settings, snapshot)
                 self.stage.emit(tr("splash.warming"))
-                engine.warmup()
+                try:
+                    engine.warmup()
+                except Exception:
+                    engine.unload_model()
+                    raise
                 self.asr_ready.emit(engine)
             except Exception as e:
                 logging.getLogger(__name__).exception("Background startup failed")

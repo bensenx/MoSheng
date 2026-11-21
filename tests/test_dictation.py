@@ -262,6 +262,169 @@ class WorkerTests(unittest.TestCase):
 
 
 class ReadinessTests(unittest.TestCase):
+    def test_standby_close_skips_device_discovery_and_weights(self):
+        from core.windows_model_host import _serve
+        pipe = Mock()
+        pipe.poll.return_value = True
+        pipe.recv.return_value = ("close", ())
+        self.enterContext(patch("utils.logger.setup_logging"))
+        self.enterContext(patch.dict(sys.modules, {"qwen_asr": Mock()}))
+        self.enterContext(patch("torch.cuda.is_initialized", return_value=False))
+        available = self.enterContext(patch("torch.cuda.is_available"))
+        engine = self.enterContext(patch("core.asr_qwen.QwenASREngine"))
+        _serve(pipe, None)
+        available.assert_not_called()
+        engine.assert_not_called()
+        pipe.close.assert_called_once()
+
+    def test_early_resume_uses_current_config_and_a_crashed_standby_cold_starts(self):
+        from core.windows_model_host import WindowsModelHost, WindowsModelStandby
+        for crashed in (False, True):
+            with self.subTest(crashed=crashed), patch("core.windows_model_host._spawn") as spawn:
+                waiting, cold = (Mock(), Mock()), (Mock(), Mock())
+                waiting[1].recv.side_effect = EOFError() if crashed else [(True, None)]
+                cold[1].recv.return_value = (True, None)
+                spawn.side_effect = [waiting, cold]
+                standby = WindowsModelStandby()
+                standby.prepare()
+                standby.prepare()
+                host = WindowsModelHost(device="cuda:1")
+                host.load_model(standby)
+                waiting[1].send.assert_any_call(("load", {"device": "cuda:1"}))
+                self.assertEqual(spawn.call_count, 2 if crashed else 1)
+                self.assertIsNone(standby.take())
+                host.unload_model()
+
+    def test_host_handles_dictation_and_shared_speaker_lifetimes(self):
+        from core.windows_model_host import _serve
+        pipe = Mock()
+        pipe.recv.side_effect = [
+            ("warmup", ()), ("speaker_load", ("old",)), ("speaker_load", ("new",)),
+            ("speaker_release", ("old",)), ("embedding", ("audio", 16000)),
+            ("speaker_release", ("new",)), ("transcribe", ("audio", 16000, "vocabulary")),
+            ("close", ()),
+        ]
+        asr = self.enterContext(patch("core.asr_qwen.QwenASREngine")).return_value
+        from unittest.mock import MagicMock
+        speaker_class = MagicMock()
+        speaker = speaker_class.return_value
+        self.enterContext(patch.dict(sys.modules, {
+            "core.speaker_verifier": SimpleNamespace(SpeakerVerifier=speaker_class),
+        }))
+        self.enterContext(patch("utils.logger.setup_logging"))
+        _serve(pipe, {"device": "cpu"})
+        asr.load_model.assert_called_once()
+        asr.warmup.assert_called_once()
+        asr.transcribe.assert_called_once_with("audio", 16000, "vocabulary")
+        speaker.load_model.assert_called_once()
+        speaker.extract_embedding.assert_called_once_with("audio", 16000)
+        speaker.unload_model.assert_called_once()
+        pipe.send.assert_called_with((True, asr.transcribe.return_value))
+        pipe.close.assert_called_once()
+
+    def test_tray_pause_drains_audio_and_manual_resume_retries(self):
+        from settings_manager import SettingsManager
+        from ui.app import MoShengApp
+        from i18n import tr
+        settings = SettingsManager()
+        settings.set("speaker_verification", "enabled", False)
+        settings.set("hotkey", "progressive", False)
+        settings.set("dictation_paused", False)
+        settings.save = Mock()
+        hook = self.enterContext(patch("ui.app.DualHotkeyManager")).return_value
+        self.enterContext(patch("ui.app.OverlayWindow"))
+        if sys.platform == "win32":
+            self.enterContext(patch("ui.input_mode_badge.InputModeBadge"))
+        self.enterContext(patch("ui.app.QSystemTrayIcon"))
+        self.enterContext(patch.object(AudioRecorder, "check_device"))
+        opened, decoding, finish = threading.Event(), threading.Event(), threading.Event()
+        stream = self.enterContext(patch("core.audio_recorder.sd.InputStream"))
+        first, second = Mock(is_ready=True), Mock(is_ready=True)
+        factory = Mock(side_effect=[RuntimeError("out of memory"), second])
+        ctl = MoShengApp(first, settings, resume_engine=factory)
+        ctl._worker._injector = Mock()
+        ctl._worker._sound_player = None
+
+        def start_stream():
+            ctl._recorder._audio_callback(np.ones((16000, 1), dtype=np.float32), 16000, None, None)
+            opened.set()
+
+        def transcribe(*args, **kwargs):
+            decoding.set()
+            self.assertTrue(finish.wait(3))
+            return "Finished."
+
+        def until(phase):
+            limit = time.monotonic() + 4
+            while ctl._phase != phase and time.monotonic() < limit:
+                app.processEvents()
+                time.sleep(.01)
+            self.assertEqual(ctl._phase, phase)
+
+        stream.return_value.start.side_effect = start_stream
+        first.transcribe.side_effect = transcribe
+        ctl.start()
+        try:
+            ctl._on_hotkey_start()
+            self.assertTrue(opened.wait(2))
+            ctl._update_pause_action()
+            self.assertEqual(ctl._pause_action.text(), tr("tray.pause_after"))
+            ctl._pause_action.trigger()
+            self.assertTrue(settings.get("dictation_paused"))
+            ctl._worker.enqueue("stop")
+            self.assertTrue(decoding.wait(2))
+            first.unload_model.assert_not_called()
+            finish.set()
+            until("paused")
+            first.unload_model.assert_called_once()
+            ctl._worker._injector.inject_text.assert_called_once()
+            ctl._on_hotkey_start()
+            factory.assert_not_called()
+            if ctl._mode_badge:
+                ctl._mode_badge.set_enabled.assert_called_once_with(True)
+            with self.assertLogs("ui.app", level="ERROR"):
+                ctl._pause_action.trigger()
+                until("retry")
+            self.assertTrue(settings.get("dictation_paused"))
+            ctl._pause_action.trigger()
+            until("active")
+            self.assertFalse(settings.get("dictation_paused"))
+            self.assertIs(ctl._worker._asr, second)
+            self.assertEqual(hook.start.call_count, 2)
+        finally:
+            finish.set()
+            ctl._shutdown()
+            app.aboutToQuit.disconnect(ctl._shutdown)
+
+    def test_persisted_pause_starts_only_the_resident_services(self):
+        from settings_manager import SettingsManager
+        from ui.app import MoShengApp
+        settings = SettingsManager()
+        settings.set("dictation_paused", True)
+        settings.set("hotkey", "progressive", True)
+        settings.set("speaker_verification", "enabled", True)
+        self.enterContext(patch("ui.app.OverlayWindow"))
+        self.enterContext(patch("ui.app.QSystemTrayIcon"))
+        hook = self.enterContext(patch("ui.app.DualHotkeyManager")).return_value
+        self.enterContext(patch.object(MoShengApp, "_load_vad", lambda ctl: self.fail("VAD loaded while paused")))
+        if sys.platform == "win32":
+            self.enterContext(patch("ui.input_mode_badge.InputModeBadge"))
+        factory = Mock()
+        ctl = MoShengApp(None, settings, resume_engine=factory)
+        ctl.start()
+        try:
+            ctl._on_hotkey_start()
+            ctl._sync_speaker_verifier()
+            hook.start.assert_not_called()
+            factory.assert_not_called()
+            self.assertIsNone(ctl._verifier_loader)
+            self.assertEqual(ctl._phase, "paused")
+            if ctl._mode_badge:
+                ctl._mode_badge.set_enabled.assert_called_once_with(True)
+        finally:
+            ctl._shutdown()
+            app.aboutToQuit.disconnect(ctl._shutdown)
+
     def test_application_quit_stops_the_worker_while_loading(self):
         from settings_manager import SettingsManager
         from ui.app import MoShengApp
@@ -345,6 +508,42 @@ class ReadinessTests(unittest.TestCase):
 
 
 class SettingsTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows tray activation")
+    def test_tray_double_click_opens_and_restores_settings(self):
+        from PySide6.QtWidgets import QSystemTrayIcon
+        from settings_manager import SettingsManager
+        from ui.app import MoShengApp
+        from ui.settings_window import SettingsWindow
+
+        self.enterContext(patch("ui.app.OverlayWindow"))
+        self.enterContext(patch("ui.app.DualHotkeyManager"))
+        self.enterContext(patch.object(SettingsWindow, "_get_input_devices", lambda self: [(None, "Default")]))
+        self.enterContext(patch.object(SettingsWindow, "_get_cuda_devices", lambda self: ["auto", "cpu"]))
+        coordinator = MoShengApp(None, SettingsManager())
+        activate = coordinator._tray.activated.emit
+        reason = QSystemTrayIcon.ActivationReason
+        for click in (reason.Trigger, reason.Context, reason.MiddleClick):
+            activate(click)
+            self.assertIsNone(coordinator._settings_window)
+
+        activate(reason.DoubleClick)
+        window = coordinator._settings_window
+        self.assertIsNotNone(window)
+        self.assertTrue(window.isVisible())
+        window._tabs.setCurrentIndex(1)
+        window.showMinimized()
+        activate(reason.DoubleClick)
+        self.assertIs(coordinator._settings_window, window)
+        self.assertFalse(window.isMinimized())
+        self.assertEqual(window._tabs.currentIndex(), 1)
+        window.close()
+
+        coordinator._tray.contextMenu().actions()[0].trigger()
+        reopened = coordinator._settings_window
+        self.assertIsNot(reopened, window)
+        self.assertTrue(reopened.isVisible())
+        reopened.close()
+
     def test_layout_and_keyboard_at_default_width(self):
         from i18n import set_language
         from settings_manager import SettingsManager
@@ -433,7 +632,8 @@ class OverlayTests(unittest.TestCase):
         from ui.input_mode_badge import InputModeBadge
         from core.windows_input_mode import BadgeAnchor
         badge = InputModeBadge()
-        anchor = BadgeAnchor(app.primaryScreen().name(), None)
+        screen = app.primaryScreen()
+        anchor = BadgeAnchor(screen.geometry().topLeft().toTuple(), (40, 50), 20)
         state = [(1, "EN", None)]
         read = threading.Event()
 
@@ -442,11 +642,11 @@ class OverlayTests(unittest.TestCase):
             return state[0]
 
         self.enterContext(patch("ui.input_mode_badge.focused_mode", side_effect=sample))
-        self.enterContext(patch("ui.input_mode_badge.badge_anchor", return_value=anchor))
+        locate = self.enterContext(patch("ui.input_mode_badge.badge_anchor", return_value=anchor))
         try:
             badge.set_enabled(True)
             for focus, mode, visible in ((1, "EN", True), (1, "中", True),
-                                         (2, "中", False), (2, None, False)):
+                                         (2, "中", True), (2, None, False)):
                 state[0] = (focus, mode, None)
                 read.clear()
                 self.assertTrue(read.wait(2))
@@ -460,16 +660,33 @@ class OverlayTests(unittest.TestCase):
                 if visible:
                     self.assertEqual(badge.text(), mode)
                     self.assertTrue(badge.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus)
-            screen = app.primaryScreen()
+            state[0] = (2, "EN", None)
+            until = time.monotonic() + 2
+            while not badge.isVisible() and time.monotonic() < until:
+                app.processEvents()
+                time.sleep(0.02)
+            old_pos = badge.pos()
+            locate.return_value = BadgeAnchor(screen.geometry().topLeft().toTuple(), (110, 120), 20)
+            until = time.monotonic() + 2
+            while badge.pos() == old_pos and time.monotonic() < until:
+                app.processEvents()
+                time.sleep(0.02)
+            self.assertNotEqual(badge.pos(), old_pos)
+            self.assertTrue(badge.isVisible())
+            locate.return_value = None
+            until = time.monotonic() + 2
+            while badge.isVisible() and time.monotonic() < until:
+                app.processEvents()
+                time.sleep(0.02)
+            self.assertFalse(badge.isVisible())
             offset = (int(screen.geometry().width() * screen.devicePixelRatio()) - 1,
                       int(screen.geometry().height() * screen.devicePixelRatio()) - 1)
-            badge.display("EN", BadgeAnchor(screen.name(), offset))
+            badge.display("EN", BadgeAnchor(screen.geometry().topLeft().toTuple(), offset, 20))
             self.assertTrue(screen.availableGeometry().contains(badge.geometry()))
-            self.assertTrue(badge._expiry.isActive())
             badge.set_enabled(False)
             self.assertFalse(badge.isVisible())
             self.assertIsNone(badge._watcher)
-            self.assertFalse(badge._expiry.isActive())
+            self.assertFalse(badge._blink.isActive())
         finally:
             badge.set_enabled(False)
             badge.close()

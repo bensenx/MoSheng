@@ -20,6 +20,8 @@ class GUIThreadInfo(ctypes.Structure):
 
 user32 = ctypes.WinDLL("user32")
 imm32 = ctypes.WinDLL("imm32")
+user32.GetCaretBlinkTime.argtypes = []
+user32.GetCaretBlinkTime.restype = w.UINT
 user32.GetGUIThreadInfo.argtypes = [w.DWORD, ctypes.POINTER(GUIThreadInfo)]
 user32.GetGUIThreadInfo.restype = w.BOOL
 imm32.ImmGetDefaultIMEWnd.argtypes = [w.HWND]
@@ -76,12 +78,13 @@ def window_mode(focus: int) -> str | None:
 
 @dataclass(frozen=True)
 class BadgeAnchor:
-    screen: str
-    # Physical-pixel offsets from this monitor's origin. None means no native caret.
-    caret: tuple[int, int] | None
+    monitor_origin: tuple[int, int]
+    # Physical pixels from this monitor's origin, at the foot of the caret.
+    caret: tuple[int, int]
+    height: int
 
 
-def _caret_point(info: GUIThreadInfo) -> tuple[int, int] | None:
+def _caret_point(info: GUIThreadInfo) -> tuple[int, int, int] | None:
     if not info.hwndCaret or info.rcCaret.bottom <= info.rcCaret.top:
         return None
     # rcCaret is expressed in the target window's own DPI context.
@@ -90,10 +93,14 @@ def _caret_point(info: GUIThreadInfo) -> tuple[int, int] | None:
     if not previous:
         return None
     try:
-        xy = win32gui.ClientToScreen(info.hwndCaret, (info.rcCaret.right, info.rcCaret.bottom))
-        point = w.POINT(*xy)
-        if user32.LogicalToPhysicalPointForPerMonitorDPI(info.hwndCaret, ctypes.byref(point)):
-            return point.x, point.y
+        points = []
+        for y in (info.rcCaret.top, info.rcCaret.bottom):
+            point = w.POINT(*win32gui.ClientToScreen(info.hwndCaret, (info.rcCaret.left, y)))
+            if not user32.LogicalToPhysicalPointForPerMonitorDPI(info.hwndCaret, ctypes.byref(point)):
+                return None
+            points.append(point)
+        top, bottom = points
+        return bottom.x, bottom.y, max(1, bottom.y - top.y)
     finally:
         user32.SetThreadDpiAwarenessContext(previous)
     return None
@@ -110,18 +117,26 @@ def focused_mode() -> tuple[int, str | None, GUIThreadInfo]:
     return 0, None, info
 
 
-def badge_anchor(info: GUIThreadInfo) -> BadgeAnchor | None:
+def badge_anchor(info: GUIThreadInfo, automation) -> BadgeAnchor | None:
     try:
+        if not info.hwndFocus or info.flags & 0x1e:  # Moving a window or navigating menus.
+            return None
+        # Reject stale, offscreen and placeholder coordinates from providers.
+        left, top, right, bottom = win32gui.GetWindowRect(info.hwndActive)
+
+        def inside(point):
+            return point is not None and left <= point[0] < right and top < point[1] <= bottom
+
         point = _caret_point(info)
-        if point is None:
-            monitor = win32api.MonitorFromWindow(info.hwndFocus, win32con.MONITOR_DEFAULTTONEAREST)
-        else:
-            monitor = win32api.MonitorFromPoint(point, win32con.MONITOR_DEFAULTTONEAREST)
+        if not inside(point):
+            point = automation.point()
+        if not inside(point) or win32gui.GetForegroundWindow() != info.hwndActive:
+            return None
+        monitor = win32api.MonitorFromPoint((point[0], point[1] - 1), win32con.MONITOR_DEFAULTTONULL)
+        if not monitor:
+            return None
         display = win32api.GetMonitorInfo(monitor)
-        left, top, right, bottom = display["Monitor"]
-        offset = None
-        if point and left <= point[0] < right and top <= point[1] < bottom:
-            offset = point[0] - left, point[1] - top
-        return BadgeAnchor(display["Device"], offset)
+        left, top, _, _ = display["Monitor"]
+        return BadgeAnchor((left, top), (point[0] - left, point[1] - top), point[2])
     except pywintypes.error:
         return None

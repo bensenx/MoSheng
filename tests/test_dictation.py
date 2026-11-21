@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QScrollArea
+from PySide6.QtWidgets import QApplication, QStackedWidget
 
 from core.audio_recorder import AudioRecorder
 
@@ -363,7 +363,8 @@ class SettingsTests(unittest.TestCase):
                 window.show()
                 try:
                     app.processEvents()
-                    scroll = window.findChild(QScrollArea)
+                    pages = window.findChild(QStackedWidget)
+                    scroll = pages.currentWidget()
                     self.assertEqual(window.width(), 560)
                     toggle = window._progressive_toggle
                     toggle.setChecked(False)
@@ -374,7 +375,73 @@ class SettingsTests(unittest.TestCase):
                     self.assertTrue(toggle.isChecked())
                     self.assertTrue(window._progressive_opts.isVisible())
                     self.assertEqual(scroll.horizontalScrollBar().maximum(), 0)
-                    for switch in window.findChildren(ToggleSwitch):
-                        self.assertGreaterEqual(switch.width(), switch.sizeHint().width(), switch.text())
+                    window._tabs.setFocus()
+                    for index in range(3):
+                        app.processEvents()
+                        self.assertEqual(pages.currentIndex(), index)
+                        page = pages.currentWidget()
+                        self.assertEqual(page.horizontalScrollBar().maximum(), 0)
+                        for switch in page.findChildren(ToggleSwitch):
+                            self.assertGreaterEqual(switch.width(), switch.sizeHint().width(), switch.text())
+                        if index < 2:
+                            QTest.keyClick(window._tabs, Qt.Key.Key_Right)
+                    self.assertTrue(toggle.isChecked())
                 finally:
                     window.close()
+
+    def test_shortcut_button_capture_cancel_and_save_across_tabs(self):
+        from i18n import get_language
+        from settings_manager import SettingsManager
+        from ui.settings_window import SettingsWindow
+        settings = SettingsManager()
+        settings.set("language", get_language())
+        self.enterContext(patch.object(SettingsWindow, "_get_cuda_devices", lambda self: ["auto", "cpu"]))
+        self.enterContext(patch.object(SettingsWindow, "_get_input_devices", lambda self: [(None, "Default")]))
+        self.enterContext(patch("ui.settings_window.set_autostart"))
+        save = self.enterContext(patch.object(settings, "save"))
+        window = SettingsWindow(settings)
+        window.show()
+        try:
+            btn = window._ptt_bind_btn
+            original = btn.text()
+            btn.click()
+            QTest.keyClick(window, Qt.Key.Key_Escape)
+            self.assertEqual(btn.text(), original)
+            btn.click()
+            QTest.keyClick(window, Qt.Key.Key_F8)
+            self.assertEqual(btn.text(), "F8")
+            btn.click()
+            window._tabs.setCurrentIndex(2)
+            self.assertIsNone(window._capture_target)
+            self.assertEqual(btn.text(), "F8")
+            window._on_save_click()
+            save.assert_called_once()
+            self.assertEqual(settings.get("hotkey", "push_to_talk")["keys"], ["f8"])
+        finally:
+            window.close()
+
+
+class OverlayTests(unittest.TestCase):
+    def test_localized_statuses_and_hidden_meter(self):
+        from i18n import set_language, tr
+        from ui.overlay_window import OverlayWindow
+        overlay = OverlayWindow()
+        try:
+            self.assertTrue(overlay._ready)
+            for lang in ("en", "zh"):
+                set_language(lang)
+                overlay.set_state("recording")
+                self.assertTrue(overlay._frame_timer.isActive())
+                self.assertEqual(overlay._root.property("statusMessage"), tr("overlay.recording"))
+                overlay.set_state("error", tr("worker.recording_failed"))
+                app.processEvents()
+                self.assertFalse(overlay._frame_timer.isActive())
+                self.assertGreaterEqual(overlay._view.height(), overlay._root.implicitHeight())
+                self.assertEqual(overlay._root.property("statusMessage"), tr("worker.recording_failed"))
+                overlay.set_state("result", "spoken text")
+                self.assertEqual(overlay._root.property("statusMessage"), tr("overlay.inserted"))
+                self.assertFalse(overlay._root.property("showMeter"))
+                overlay.set_state("idle")
+                self.assertFalse(overlay._frame_timer.isActive())
+        finally:
+            overlay.close()

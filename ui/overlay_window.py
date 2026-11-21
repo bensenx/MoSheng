@@ -1,4 +1,4 @@
-"""QML GPU shader overlay: five-color ink wash visualization (五色墨韵)."""
+"""Click-through Prism status pill with a live voice meter."""
 
 import logging
 import math
@@ -14,6 +14,9 @@ from PySide6.QtGui import QColor
 from PySide6.QtQuick import QQuickView
 from PySide6.QtWidgets import QApplication
 
+from i18n import tr
+from ui.styles import COLOR_ACCENT, COLOR_PINK, COLOR_RESULT, COLOR_TEXT_SECONDARY
+
 logger = logging.getLogger(__name__)
 
 # States
@@ -25,14 +28,13 @@ STATE_ERROR = "error"
 STATE_FILTERED = "filtered"
 STATE_LOADING = "loading"
 
-# State → (stateBrightness, stateHue) for shader modulation
-_STATE_VISUALS = {
-    STATE_RECORDING:   (1.0, 0.0),
-    STATE_RECOGNIZING: (1.3, 0.3),
-    STATE_RESULT:      (1.3, 0.3),
-    STATE_ERROR:       (0.8, 0.0),
-    STATE_FILTERED:    (0.7, 0.5),
-    STATE_LOADING:     (0.9, 0.5),
+_STATE_LABELS = {
+    STATE_RECORDING: ("overlay.recording", COLOR_PINK),
+    STATE_RECOGNIZING: ("overlay.recognizing", COLOR_ACCENT),
+    STATE_RESULT: ("overlay.inserted", COLOR_RESULT),
+    STATE_ERROR: ("overlay.error", COLOR_PINK),
+    STATE_FILTERED: ("overlay.filtered", COLOR_TEXT_SECONDARY),
+    STATE_LOADING: ("overlay.loading", COLOR_ACCENT),
 }
 
 # QML file path (relative to this file)
@@ -53,10 +55,10 @@ if sys.platform == "win32":
 
 
 class OverlayWindow:
-    """Bottom-center QML shader overlay for audio visualization."""
+    """Bottom-center status and audio visualization."""
 
-    HEIGHT = 140
-    WIDTH_RATIO = 0.07
+    HEIGHT = 48
+    WIDTH = 248
     MARGIN = 32
     RESULT_DISPLAY_MS = 1500
     FRAME_INTERVAL_MS = 33
@@ -80,6 +82,8 @@ class OverlayWindow:
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
+            | Qt.WindowType.WindowDoesNotAcceptFocus
+            | Qt.WindowType.WindowTransparentForInput
         )
 
         self._update_geometry()
@@ -111,29 +115,23 @@ class OverlayWindow:
             logger.error("QML root object is None, overlay disabled")
             return
 
-        brightness, hue = _STATE_VISUALS[STATE_RECORDING]
-        self._root.setProperty("stateBrightness", brightness)
-        self._root.setProperty("stateHue", hue)
-        self._root.setProperty("amplitude", 0.0)
-
         self._ready = True
         logger.info("QML overlay ready (view size: %dx%d)", self._view.width(), self._view.height())
 
     def _update_geometry(self, show_message: bool = False) -> None:
         screen = QApplication.primaryScreen()
-        if screen is None:
-            self._view.setWidth(400)
-            self._view.setHeight(self.HEIGHT)
-            return
-        geo = screen.availableGeometry()
-        w = int(geo.width() * self.WIDTH_RATIO)
-        if show_message:
-            w = min(geo.width(), max(w, 320))
-        self._view.setWidth(w)
-        self._view.setHeight(self.HEIGHT)
-        x = geo.x() + (geo.width() - w) // 2
-        y = geo.bottom() - self.HEIGHT - self.MARGIN + 1
-        self._view.setPosition(x, y)
+        width = 360 if show_message else self.WIDTH
+        if screen is not None:
+            width = min(width, screen.availableGeometry().width())
+        self._view.setWidth(width)
+        height = self.HEIGHT
+        if self._root is not None:
+            height = max(height, math.ceil(self._root.implicitHeight()))
+        self._view.setHeight(height)
+        if screen is not None:
+            geo = screen.availableGeometry()
+            self._view.setPosition(geo.x() + (geo.width() - width) // 2,
+                                   geo.bottom() - height - self.MARGIN + 1)
 
     def _set_click_through(self) -> None:
         if sys.platform == "win32":
@@ -157,14 +155,6 @@ class OverlayWindow:
             self._frame_timer.stop()
             self._view.hide()
 
-    def _fade_in(self) -> None:
-        self._view.show()
-        self._set_click_through()
-        self._fade_anim.stop()
-        self._fade_anim.setStartValue(self._opacity)
-        self._fade_anim.setEndValue(1.0)
-        self._fade_anim.start()
-
     def _show_instant(self) -> None:
         self._fade_anim.stop()
         self._opacity = 1.0
@@ -186,6 +176,7 @@ class OverlayWindow:
             self._view.hide()
 
     def close(self) -> None:
+        self._hide_timer.stop()
         self._frame_timer.stop()
         self._fade_anim.stop()
         self._view.close()
@@ -250,23 +241,10 @@ class OverlayWindow:
                 alpha = np.where(bands5 > self._band_smooth, 0.6, 0.25)
                 self._band_smooth += alpha * (bands5 - self._band_smooth)
                 self._push_bands(self._band_smooth)
-                if not hasattr(self, '_band_log_count'):
-                    self._band_log_count = 0
-                self._band_log_count += 1
-                if self._band_log_count % 30 == 1:
-                    b = self._band_smooth
-                    logger.info("FFT bands (5): [%.2f %.2f %.2f %.2f %.2f]",
-                                b[0], b[1], b[2], b[3], b[4])
 
         elif self._state == STATE_RECOGNIZING:
             t = time.monotonic() - self._breath_start
             self._target_rms = 0.3 + 0.2 * math.sin(2.0 * math.pi * t / 2.0)
-        elif self._state == STATE_LOADING:
-            t = time.monotonic() - self._breath_start
-            self._target_rms = 0.25 + 0.15 * math.sin(2.0 * math.pi * t / 1.5)
-        elif self._state in (STATE_RESULT, STATE_ERROR, STATE_FILTERED):
-            t = time.monotonic() - self._breath_start
-            self._target_rms = max(0.35 * math.exp(-t * 1.5), 0.0)
         else:
             self._target_rms = 0.0
 
@@ -284,8 +262,10 @@ class OverlayWindow:
     def enabled(self, value: bool) -> None:
         self._enabled = value
         if not value and self._ready:
+            self._hide_timer.stop()
             self._frame_timer.stop()
             self._fade_anim.stop()
+            self._opacity = 0.0
             self._view.setOpacity(0.0)
             self._view.hide()
 
@@ -296,31 +276,22 @@ class OverlayWindow:
             return
 
         self._hide_timer.stop()
-        message = text if state in (STATE_LOADING, STATE_FILTERED, STATE_ERROR) else ""
-        if self._root.property("statusMessage") != message:
-            self._root.setProperty("statusMessage", message)
-            self._update_geometry(bool(message))
         self._state = state
-
-        brightness, hue = _STATE_VISUALS.get(state, _STATE_VISUALS[STATE_RECORDING])
-        if self._root is not None:
-            self._root.setProperty("stateBrightness", brightness)
-            self._root.setProperty("stateHue", hue)
-
         if state == STATE_IDLE:
             self._frame_timer.stop()
             self.hide()
             return
 
-        if state == STATE_RECORDING:
+        label, color = _STATE_LABELS[state]
+        detailed = state in (STATE_LOADING, STATE_FILTERED, STATE_ERROR) and bool(text)
+        self._root.setProperty("statusMessage", text if detailed else tr(label))
+        self._root.setProperty("indicator", QColor(color))
+        self._root.setProperty("showMeter", state in (STATE_RECORDING, STATE_RECOGNIZING))
+        self._update_geometry(detailed)
+
+        if state in (STATE_RECORDING, STATE_RECOGNIZING):
             self._display_rms = 0.0
             self._target_rms = 0.0
-            self._band_smooth[:] = 0.0
-            self._show_instant()
-            if not self._frame_timer.isActive():
-                self._frame_timer.start(self.FRAME_INTERVAL_MS)
-
-        elif state == STATE_RECOGNIZING:
             self._breath_start = time.monotonic()
             self._band_smooth[:] = 0.0
             self._zero_bands()
@@ -328,23 +299,9 @@ class OverlayWindow:
             if not self._frame_timer.isActive():
                 self._frame_timer.start(self.FRAME_INTERVAL_MS)
 
-        elif state == STATE_LOADING:
-            self._breath_start = time.monotonic()
-            self._band_smooth[:] = 0.0
-            self._zero_bands()
+        else:
+            self._frame_timer.stop()
             self._show_instant()
-            if not self._frame_timer.isActive():
-                self._frame_timer.start(self.FRAME_INTERVAL_MS)
-            self._hide_timer.start(1500)
-
-        elif state in (STATE_RESULT, STATE_ERROR, STATE_FILTERED):
-            self._breath_start = time.monotonic()
-            self._display_rms = 0.35
-            self._band_smooth[:] = 0.0
-            self._zero_bands()
-            self._show_instant()
-            if not self._frame_timer.isActive():
-                self._frame_timer.start(self.FRAME_INTERVAL_MS)
             duration = 3500 if state == STATE_ERROR else self.RESULT_DISPLAY_MS
             self._hide_timer.start(duration)
 

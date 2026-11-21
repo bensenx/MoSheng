@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from config import SPEAKER_DIR
 from i18n import tr
 from settings_manager import SettingsManager
-from ui.styles import COLOR_ACCENT, COLOR_RESULT, COLOR_TEXT_SECONDARY, apply_acrylic_effect
+from ui.styles import COLOR_ACCENT, COLOR_RESULT, COLOR_TEXT_SECONDARY, style_title_bar
 
 logger = logging.getLogger(__name__)
 
@@ -53,9 +53,6 @@ class EnrollmentDialog(QDialog):
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
-        import sys
-        if sys.platform != "darwin":
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
         self._build_ui()
@@ -63,13 +60,7 @@ class EnrollmentDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        import sys
-        if sys.platform == "darwin":
-            self.setStyleSheet("background-color: #141418;")
-        else:
-            hwnd = int(self.winId())
-            if not apply_acrylic_effect(hwnd):
-                self.setStyleSheet("background-color: #141418;")
+        style_title_bar(self)
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)

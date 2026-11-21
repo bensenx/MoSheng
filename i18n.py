@@ -109,6 +109,12 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
 
     # ---- ui/settings_window.py ----
+    "settings.tab_input": {"en": "Input", "zh": "输入"},
+    "settings.tab_recognition": {"en": "Recognition", "zh": "识别"},
+    "settings.tab_preferences": {"en": "Preferences", "zh": "偏好"},
+    "overlay.inserted": {"en": "Text inserted", "zh": "已输入文字"},
+    "overlay.loading": {"en": "Loading…", "zh": "正在加载…"},
+    "overlay.error": {"en": "Dictation error", "zh": "听写出错"},
     "settings.title": {
         "zh": "MoSheng 设置",
         "en": "MoSheng Settings",
@@ -136,7 +142,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     # -- Hotkey section --
     "settings.hotkey_section": {
         "zh": "快捷键设置",
-        "en": "Hotkey Settings",
+        "en": "Shortcuts",
     },
     "settings.hotkey_label": {
         "zh": "快捷键",
@@ -168,7 +174,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     },
     "settings.toggle_mode": {
         "zh": "按键切换",
-        "en": "Toggle",
+        "en": "Toggle recording",
     },
     "settings.progressive_input": {
         "zh": "渐进式输入（停顿时自动输入已识别文本）",
@@ -316,7 +322,7 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
     # -- Buttons --
     "settings.save": {
         "zh": "保存",
-        "en": "Save",
+        "en": "Save settings",
     },
     "settings.cancel": {
         "zh": "取消",

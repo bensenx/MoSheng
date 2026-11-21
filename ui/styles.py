@@ -1,6 +1,6 @@
-"""Glassmorphism dark theme: QSS stylesheet, DWM backdrop, color constants, ToggleSwitch."""
+"""Prism palette, native widget styles, and shared interface artwork."""
 
-import logging
+import os
 import math
 import sys
 
@@ -8,54 +8,33 @@ from PySide6.QtCore import (
     Property, QEasingCurve, QPointF, QPropertyAnimation, QRect, QRectF,
     QSize, Qt,
 )
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QCheckBox, QGroupBox, QWidget
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtWidgets import QCheckBox, QGroupBox, QHBoxLayout, QLabel, QWidget
 
 if sys.platform == "win32":
     import ctypes
 
-logger = logging.getLogger(__name__)
+from config import ASSETS_DIR
+
+_ASSET_URL = ASSETS_DIR.replace(os.sep, "/")
 
 # ---------------------------------------------------------------------------
-# Color palette  (Glassmorphism dark)
-# ---------------------------------------------------------------------------
-COLOR_BASE = "rgba(20, 20, 24, 0.85)"
-COLOR_BASE_SOLID = "#141418"
-COLOR_SURFACE = "rgba(255, 255, 255, 0.12)"
-COLOR_SURFACE_HOVER = "rgba(255, 255, 255, 0.16)"
-COLOR_SURFACE_ACTIVE = "rgba(255, 255, 255, 0.08)"
-COLOR_ACCENT = "#5b7fff"
-COLOR_ACCENT_HOVER = "#7b9aff"
-COLOR_TEXT = "#f0f0f0"
-COLOR_TEXT_SECONDARY = "rgba(255, 255, 255, 0.55)"
-COLOR_TEXT_DISABLED = "rgba(255, 255, 255, 0.28)"
-COLOR_BORDER = "rgba(255, 255, 255, 0.08)"
-COLOR_BORDER_HOVER = "rgba(255, 255, 255, 0.14)"
-COLOR_BORDER_FOCUS = "#5b7fff"
-
-# Overlay / tray state colors
-COLOR_RECORDING = "#f38ba8"
-COLOR_RECOGNIZING = "#f9e2af"
-COLOR_RESULT = "#a6e3a1"
-COLOR_ERROR = "#f38ba8"
-COLOR_FILTERED = "#6c7086"
-COLOR_IDLE_TRAY = "#6c7086"
-
-# Overlay background
-COLOR_OVERLAY_BG = "#1a1a24"
-COLOR_OVERLAY_TEXT = "#e0e0e8"
-
-# Ink waveform overlay colors
-COLOR_INK_RECORDING = "#7b8fa8"
-COLOR_INK_RECOGNIZING = "#d4a857"
-COLOR_INK_FILTERED = "#6c7086"
-
-# Five-color ink palette
-COLOR_INK_PINE_SOOT = "#2d3436"
-COLOR_INK_INDIGO = "#4a6fa5"
-COLOR_INK_OCHRE = "#b87333"
-COLOR_INK_CINNABAR = "#c24c40"
-COLOR_INK_GAMBOGE = "#d4a857"
+# Prism palette
+COLOR_BASE_SOLID = "#171521"
+COLOR_HEADER = "#211b33"
+COLOR_SURFACE = "#241f32"
+COLOR_FIELD = "#302a40"
+COLOR_SURFACE_HOVER = "#433950"
+COLOR_SURFACE_ACTIVE = "#382d49"
+COLOR_ACCENT = "#b6a4ff"
+COLOR_ACCENT_HOVER = "#cabaff"
+COLOR_PINK = "#fd92b5"
+COLOR_RESULT = "#6be4d9"
+COLOR_TEXT = "#f7f2ff"
+COLOR_TEXT_SECONDARY = "#c2b7d3"
+COLOR_BORDER = "#44394f"
+COLOR_BORDER_HOVER = "#71617e"
+COLOR_BORDER_FOCUS = COLOR_ACCENT
 
 # ---------------------------------------------------------------------------
 # Font
@@ -66,49 +45,44 @@ else:
     FONT_FAMILY = '"Segoe UI Variable", "Segoe UI", "Microsoft YaHei UI", sans-serif'
 
 # ---------------------------------------------------------------------------
-# Windows DWM Acrylic / Mica backdrop
+# Windows native title bar
 # ---------------------------------------------------------------------------
 
-def apply_acrylic_effect(hwnd: int) -> bool:
-    """Apply platform-specific translucent backdrop. Returns True on success.
-
-    On macOS this is a no-op — Qt's WA_TranslucentBackground handles transparency.
-    The Windows DWM Acrylic path is only available on Windows.
-    """
-    if sys.platform != "win32":
-        return False
-    try:
-        attr = 38
-        value = ctypes.c_int(3)
-        hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
-        )
-        if hr != 0:
-            value = ctypes.c_int(4)
-            hr = ctypes.windll.dwmapi.DwmSetWindowAttribute(
-                hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)
-            )
-        dark = ctypes.c_int(1)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(
-            hwnd, 20, ctypes.byref(dark), ctypes.sizeof(dark)
-        )
-
-        class MARGINS(ctypes.Structure):
-            _fields_ = [
-                ("cxLeftWidth", ctypes.c_int), ("cxRightWidth", ctypes.c_int),
-                ("cyTopHeight", ctypes.c_int), ("cyBottomHeight", ctypes.c_int),
-            ]
-        margins = MARGINS(-1, -1, -1, -1)
-        ctypes.windll.dwmapi.DwmExtendFrameIntoClientArea(hwnd, ctypes.byref(margins))
-        return hr == 0
-    except Exception:
-        logger.debug("DWM acrylic effect not available")
-        return False
+def style_title_bar(widget: QWidget) -> None:
+    """Use the system window controls on a matching dark Windows caption."""
+    if sys.platform == "win32":
+        color = QColor(COLOR_HEADER)
+        hwnd = ctypes.c_void_p(int(widget.winId()))
+        for attribute, value in ((20, 1), (35, color.red() | color.green() << 8 | color.blue() << 16)):
+            setting = ctypes.c_int(value)
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attribute, ctypes.byref(setting), 4)
 
 
-# ---------------------------------------------------------------------------
-# Global QSS stylesheet (Glassmorphism)
-# ---------------------------------------------------------------------------
+class PrismHeader(QWidget):
+    """Title and static voice ribbon shared by Settings and startup."""
+    def __init__(self, title: str, compact: bool = False):
+        super().__init__()
+        self._ribbon = QPixmap(os.path.join(ASSETS_DIR, "prism-ribbon.png"))
+        self.setFixedHeight(66 if compact else 102)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(18 if compact else 24, 0, 0, 0)
+        label = QLabel(title)
+        label.setStyleSheet(f"font-size: {26 if compact else 36}px; font-weight: 700;")
+        layout.addWidget(label)
+        layout.addStretch()
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.fillRect(self.rect(), QColor(COLOR_HEADER))
+        if not self._ribbon.isNull():
+            width = self.width() * 0.50
+            height = width * self._ribbon.height() / self._ribbon.width()
+            rect = QRectF(self.width() - width - 13, (self.height() - height) / 2, width, height)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+            p.drawPixmap(rect, self._ribbon, QRectF(self._ribbon.rect()))
+        p.end()
+
+
 FLUENT_DARK_STYLESHEET = f"""
 /* ---- Global ---- */
 * {{
@@ -118,33 +92,41 @@ FLUENT_DARK_STYLESHEET = f"""
 }}
 
 /* ---- QDialog / QWidget backgrounds ---- */
-QDialog, QWidget#settingsRoot {{
-    background-color: transparent;
-}}
-
-/* Fallback solid bg when acrylic not available */
-QDialog#settingsFallback {{
+QDialog, QScrollArea, QWidget#settingsPage {{
     background-color: {COLOR_BASE_SOLID};
 }}
-
-/* ---- QGroupBox (glass card) ---- */
 QGroupBox {{
-    background-color: {COLOR_SURFACE};
+    background: {COLOR_SURFACE};
     border: 1px solid {COLOR_BORDER};
-    border-radius: 12px;
-    margin-top: 14px;
-    padding: 20px 16px 16px 16px;
-    font-weight: 600;
-    font-size: 13px;
+    border-radius: 13px;
+    margin: 0;
+    padding: 38px 9px 8px 9px;
 }}
 QGroupBox::title {{
-    subcontrol-origin: margin;
+    subcontrol-origin: border;
     subcontrol-position: top left;
-    padding: 2px 10px 2px 34px;
-    color: {COLOR_TEXT_SECONDARY};
-    font-size: 12px;
-    font-weight: 500;
+    left: 42px; top: 12px;
+    color: {COLOR_TEXT};
+    font-size: 15px; font-weight: 600;
 }}
+QTabBar {{
+    background: {COLOR_FIELD}; border-radius: 10px;
+}}
+QTabBar::tab {{
+    background: transparent; color: {COLOR_TEXT_SECONDARY};
+    padding: 6px 12px; margin: 3px; border-radius: 7px;
+    border: 1px solid transparent;
+}}
+QTabBar::tab:selected {{ background: #51446e; color: {COLOR_TEXT}; }}
+QTabBar::tab:hover:!selected {{ background: {COLOR_SURFACE_HOVER}; }}
+QTabBar::tab:selected:focus, QPushButton:focus {{ border: 1px solid {COLOR_ACCENT}; }}
+QSpinBox, QDoubleSpinBox {{
+    background: {COLOR_FIELD}; color: {COLOR_TEXT};
+    border: 1px solid {COLOR_BORDER}; border-radius: 6px; padding: 4px 8px;
+}}
+QSpinBox:focus, QDoubleSpinBox:focus {{ border-color: {COLOR_ACCENT}; }}
+QProgressBar {{ background: {COLOR_FIELD}; border: none; border-radius: 4px; }}
+QProgressBar::chunk {{ background: {COLOR_RESULT}; border-radius: 4px; }}
 
 /* ---- QLabel ---- */
 QLabel {{
@@ -178,7 +160,7 @@ QLineEdit:read-only {{
 
 /* ---- QPushButton ---- */
 QPushButton {{
-    background-color: {COLOR_SURFACE};
+    background-color: {COLOR_FIELD};
     border: 1px solid {COLOR_BORDER};
     border-radius: 8px;
     padding: 8px 20px;
@@ -198,7 +180,7 @@ QPushButton:pressed {{
 QPushButton#primaryButton {{
     background-color: {COLOR_ACCENT};
     border: 1px solid {COLOR_ACCENT};
-    color: #ffffff;
+    color: #201637;
     font-weight: 600;
 }}
 QPushButton#primaryButton:hover {{
@@ -206,7 +188,7 @@ QPushButton#primaryButton:hover {{
     border: 1px solid {COLOR_ACCENT_HOVER};
 }}
 QPushButton#primaryButton:pressed {{
-    background-color: #4a6be0;
+    background-color: #a18be8;
 }}
 
 /* Danger button (hotkey capture) */
@@ -218,7 +200,7 @@ QPushButton#dangerButton {{
 
 /* ---- QComboBox ---- */
 QComboBox {{
-    background-color: {COLOR_SURFACE};
+    background-color: {COLOR_FIELD};
     border: 1px solid {COLOR_BORDER};
     border-radius: 8px;
     padding: 7px 12px;
@@ -237,14 +219,28 @@ QComboBox::drop-down {{
     width: 28px;
 }}
 QComboBox::down-arrow {{
-    image: none;
-    border-left: 5px solid transparent;
-    border-right: 5px solid transparent;
-    border-top: 5px solid rgba(255, 255, 255, 0.45);
-    margin-right: 10px;
+    image: url("{_ASSET_URL}/chevron-down.svg");
+    width: 12px; height: 10px;
+}}
+QSpinBox::up-button, QSpinBox::down-button, QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{
+    subcontrol-origin: border;
+    width: 24px; background: {COLOR_SURFACE_ACTIVE};
+    border-left: 1px solid {COLOR_BORDER};
+}}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{
+    subcontrol-position: top right; border-top-right-radius: 6px;
+}}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{
+    subcontrol-position: bottom right; border-bottom-right-radius: 6px;
+}}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{
+    image: url("{_ASSET_URL}/chevron-up.svg"); width: 10px; height: 8px;
+}}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{
+    image: url("{_ASSET_URL}/chevron-down.svg"); width: 10px; height: 8px;
 }}
 QComboBox QAbstractItemView {{
-    background-color: rgba(30, 30, 36, 0.95);
+    background-color: {COLOR_SURFACE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 8px;
     selection-background-color: {COLOR_SURFACE_HOVER};
@@ -317,7 +313,7 @@ QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
 
 /* ---- QMenu (tray context menu) ---- */
 QMenu {{
-    background-color: rgba(30, 30, 36, 0.92);
+    background-color: {COLOR_SURFACE};
     border: 1px solid {COLOR_BORDER};
     border-radius: 12px;
     padding: 6px 4px;
@@ -343,11 +339,11 @@ QMenu::separator {{
 # ---------------------------------------------------------------------------
 
 class ToggleSwitch(QCheckBox):
-    """A glassmorphism-style toggle switch with smooth animation."""
+    """A labeled switch with an animated thumb and a keyboard focus outline."""
 
-    TRACK_WIDTH = 44
-    TRACK_HEIGHT = 24
-    KNOB_RADIUS = 8
+    TRACK_WIDTH = 38
+    TRACK_HEIGHT = 20
+    KNOB_RADIUS = 6
     KNOB_MARGIN = 4
 
     def __init__(self, text: str = "", checked: bool = False, parent: QWidget | None = None):
@@ -392,7 +388,8 @@ class ToggleSwitch(QCheckBox):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        track_rect = QRect(1, (self.height() - self.TRACK_HEIGHT) // 2,
+        track_x = self.width() - self.TRACK_WIDTH
+        track_rect = QRect(track_x + 1, (self.height() - self.TRACK_HEIGHT) // 2,
                            self.TRACK_WIDTH - 2, self.TRACK_HEIGHT)
         track_radius = self.TRACK_HEIGHT / 2
 
@@ -411,20 +408,19 @@ class ToggleSwitch(QCheckBox):
         knob_y = self.height() // 2
         x_off = self.KNOB_MARGIN + self.KNOB_RADIUS
         x_on = self.TRACK_WIDTH - self.KNOB_MARGIN - self.KNOB_RADIUS
-        knob_x = x_off + (x_on - x_off) * self._knob_pos
+        knob_x = track_x + x_off + (x_on - x_off) * self._knob_pos
 
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0, 0, 0, 40))
         p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS + 1),
                        self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)
-        p.setBrush(QColor("#ffffff"))
+        p.setBrush(QColor("#201637" if self.isChecked() else COLOR_TEXT_SECONDARY))
         p.drawEllipse(int(knob_x - self.KNOB_RADIUS), int(knob_y - self.KNOB_RADIUS),
                        self.KNOB_RADIUS * 2, self.KNOB_RADIUS * 2)
 
         if self.text():
             p.setPen(QColor(COLOR_TEXT))
-            text_x = self.TRACK_WIDTH + 12
-            p.drawText(text_x, 0, self.width() - text_x, self.height(),
+            p.drawText(0, 0, track_x - 8, self.height(),
                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
                        self.text())
 
@@ -445,27 +441,6 @@ def _screen_dpr() -> float:
     return 2.0
 
 
-def load_icon_pixmap(logical_size: int) -> QPixmap | None:
-    import os
-    from config import ASSETS_DIR
-
-    dpr = _screen_dpr()
-    icon_exts = ("png", "icns") if sys.platform == "darwin" else ("png", "ico")
-    for ext in icon_exts:
-        path = os.path.join(ASSETS_DIR, f"icon.{ext}")
-        if os.path.isfile(path):
-            physical = round(logical_size * dpr)
-            pm = QPixmap(path).scaled(
-                physical, physical,
-                Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            pm.setDevicePixelRatio(dpr)
-            return pm
-    return None
-
-
-# ---------------------------------------------------------------------------
 # Section icons (QPainter line art)
 # ---------------------------------------------------------------------------
 
@@ -580,19 +555,19 @@ def draw_section_icon(name: str, color: str = COLOR_ACCENT, size: int = 18) -> Q
 # IconGroupBox: QGroupBox with a painted section icon
 # ---------------------------------------------------------------------------
 
-COLOR_ICON = "#8aa4ff"
+SECTION_COLORS = {"keyboard": COLOR_PINK, "shield": COLOR_RESULT, "waveform": COLOR_RESULT}
 
 class IconGroupBox(QGroupBox):
     def __init__(self, title: str, icon_name: str, parent: QWidget | None = None):
         super().__init__(title, parent)
-        self._icon_pixmap = draw_section_icon(icon_name, COLOR_ICON, 18)
+        self._icon_pixmap = draw_section_icon(icon_name, SECTION_COLORS.get(icon_name, COLOR_ACCENT), 18)
 
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        x = 12
-        y = -1
+        x = 17
+        y = 14
         p.drawPixmap(x, y, self._icon_pixmap)
         p.end()

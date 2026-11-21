@@ -1,21 +1,15 @@
-"""Glassmorphism splash screen shown during model loading."""
+"""Prism splash screen shown during model loading."""
 
 from PySide6.QtCore import QPropertyAnimation, QEasingCurve, QTimer, Property, Qt
-from PySide6.QtGui import QColor, QFont, QPainter
-from PySide6.QtWidgets import QApplication, QHBoxLayout, QLabel, QVBoxLayout, QWidget
+from PySide6.QtGui import QColor, QPainter
+from PySide6.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
-from ui.styles import (
-    COLOR_ACCENT,
-    COLOR_OVERLAY_BG,
-    COLOR_TEXT,
-    COLOR_TEXT_SECONDARY,
-    FONT_FAMILY,
-    load_icon_pixmap,
-)
+from i18n import tr
+from ui.styles import COLOR_ACCENT, COLOR_BASE_SOLID, COLOR_PINK, COLOR_RESULT, COLOR_TEXT_SECONDARY, PrismHeader
 
 
 class SplashScreen(QWidget):
-    """Centered splash window with glassmorphism backdrop and animated status."""
+    """Centered startup window with the Prism ribbon and loading status."""
 
     WIDTH = 360
     HEIGHT = 180
@@ -56,44 +50,15 @@ class SplashScreen(QWidget):
 
     def _build_ui(self):
         root = QVBoxLayout(self)
-        root.setContentsMargins(32, 28, 32, 24)
-        root.setSpacing(0)
-
-        # Icon + title row
-        title_row = QHBoxLayout()
-        title_row.setSpacing(12)
-
-        icon_label = QLabel(self)
-        icon_label.setFixedSize(36, 36)
-        pm = load_icon_pixmap(36)
-        if pm:
-            icon_label.setPixmap(pm)
-        icon_label.setStyleSheet("background: transparent;")
-        title_row.addWidget(icon_label)
-
-        title = QLabel("MoSheng", self)
-        title.setFont(QFont("Segoe UI Variable", 20, QFont.Weight.DemiBold))
-        title.setStyleSheet(f"color: {COLOR_TEXT}; background: transparent;")
-        title_row.addWidget(title)
-        title_row.addStretch()
-
-        root.addLayout(title_row)
-        root.addSpacing(20)
-
-        # Status text
-        self._status_label = QLabel("Starting...", self)
-        self._status_label.setFont(QFont("Segoe UI Variable", 12))
-        self._status_label.setStyleSheet(
-            f"color: {COLOR_TEXT_SECONDARY}; background: transparent;"
-        )
+        root.setContentsMargins(12, 10, 12, 14)
+        root.setSpacing(5)
+        root.addWidget(PrismHeader("MoSheng", compact=True))
+        self._status_label = QLabel(tr("overlay.loading"), self)
+        self._status_label.setWordWrap(True)
+        self._status_label.setStyleSheet("font-size: 15px; font-weight: 600; padding-left: 8px;")
         root.addWidget(self._status_label)
-
-        # Hint text (shown only during slow operations)
-        self._hint_label = QLabel("", self)
-        self._hint_label.setFont(QFont("Segoe UI Variable", 10))
-        self._hint_label.setStyleSheet(
-            f"color: {COLOR_TEXT_SECONDARY}; background: transparent; opacity: 0.6;"
-        )
+        self._hint_label = QLabel(self)
+        self._hint_label.setStyleSheet(f"color: {COLOR_TEXT_SECONDARY}; font-size: 12px; padding-left: 8px;")
         self._hint_label.setWordWrap(True)
         self._hint_label.hide()
         root.addWidget(self._hint_label)
@@ -104,7 +69,7 @@ class SplashScreen(QWidget):
         bar.setFixedHeight(3)
         bar.setStyleSheet(
             f"background: qlineargradient(x1:0,y1:0,x2:1,y2:0,"
-            f"stop:0 transparent, stop:0.5 {COLOR_ACCENT}, stop:1 transparent);"
+            f"stop:0 {COLOR_PINK}, stop:0.5 {COLOR_ACCENT}, stop:1 {COLOR_RESULT});"
             f"border-radius: 1px;"
         )
         root.addWidget(bar)
@@ -129,8 +94,7 @@ class SplashScreen(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        bg = QColor(COLOR_OVERLAY_BG)
-        bg.setAlphaF(0.88)
+        bg = QColor(COLOR_BASE_SOLID)
         p.setBrush(bg)
 
         p.setPen(Qt.PenStyle.NoPen)

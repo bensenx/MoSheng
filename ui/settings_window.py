@@ -1,16 +1,16 @@
-"""Settings window with glassmorphism dark theme and DWM Mica backdrop."""
+"""Prism settings window for input, recognition and app preferences."""
 
 import logging
 from typing import Callable
 
 import os
 
-from PySide6.QtCore import QMetaObject, Qt, Slot, Q_ARG
+from PySide6.QtCore import Qt, Slot
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QComboBox, QDialog, QMessageBox,
-    QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QDoubleSpinBox, QScrollArea, QSpinBox, QVBoxLayout, QWidget,
+    QHBoxLayout, QLabel, QPushButton,
+    QDoubleSpinBox, QScrollArea, QSpinBox, QStackedWidget, QTabBar, QVBoxLayout, QWidget,
 )
 
 from config import ASSETS_DIR, ASR_MODELS, VOCABULARY_FILE
@@ -18,8 +18,7 @@ from utils.autostart import is_autostart_enabled, set_autostart
 from i18n import tr, get_language, SUPPORTED_LANGUAGES
 from settings_manager import SettingsManager
 from ui.styles import (
-    COLOR_ACCENT, COLOR_TEXT_SECONDARY, IconGroupBox, ToggleSwitch,
-    apply_acrylic_effect, load_icon_pixmap,
+    IconGroupBox, PrismHeader, ToggleSwitch, style_title_bar,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,9 +34,7 @@ class SettingsWindow(QDialog):
         self._input_devices: list[tuple[int | None, str]] = []
 
         # Hotkey capture state
-        self._capturing_hotkey = False
         self._captured_keys: set[str] = set()
-        self._hotkey_hook = None
         self._capture_target: str | None = None  # "ptt" or "toggle"
 
         # Current binding keys (loaded from settings)
@@ -51,9 +48,6 @@ class SettingsWindow(QDialog):
         self.setWindowFlags(
             self.windowFlags() & ~Qt.WindowType.WindowContextHelpButtonHint
         )
-        import sys
-        if sys.platform != "darwin":
-            self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self.setObjectName("settingsRoot")
 
@@ -66,23 +60,12 @@ class SettingsWindow(QDialog):
         self._build_ui()
         self.setMinimumHeight(400)
         self.setMaximumHeight(800)
-        self.resize(self.minimumWidth(), 700)
+        self.resize(self.minimumWidth(), 612)
         self._center_on_screen()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
-        import sys
-        if sys.platform == "darwin":
-            # No DWM acrylic on macOS — use solid fallback
-            self.setObjectName("settingsFallback")
-            self.style().unpolish(self)
-            self.style().polish(self)
-        else:
-            hwnd = int(self.winId())
-            if not apply_acrylic_effect(hwnd):
-                self.setObjectName("settingsFallback")
-                self.style().unpolish(self)
-                self.style().polish(self)
+        style_title_bar(self)
 
     def _center_on_screen(self) -> None:
         from PySide6.QtWidgets import QApplication
@@ -96,53 +79,41 @@ class SettingsWindow(QDialog):
     def _build_ui(self) -> None:
         s = self._settings
         main_layout = QVBoxLayout(self)
-        main_layout.setSpacing(8)
-        main_layout.setContentsMargins(24, 24, 24, 24)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        main_layout.addWidget(PrismHeader(tr("tray.settings")))
+        body = QVBoxLayout()
+        body.setContentsMargins(22, 12, 22, 16)
+        body.setSpacing(12)
+        main_layout.addLayout(body, 1)
+        self._tabs = QTabBar()
+        self._tabs.setDrawBase(False)
+        self._tabs.setExpanding(True)
+        self._tabs.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        body.addWidget(self._tabs)
+        pages = QStackedWidget()
+        body.addWidget(pages, 1)
 
-        # --- Logo + Title Header ---
-        header = QHBoxLayout()
-        header.setSpacing(12)
+        def page(key):
+            self._tabs.addTab(tr(key))
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(scroll.Shape.NoFrame)
+            content = QWidget()
+            content.setObjectName("settingsPage")
+            layout = QVBoxLayout(content)
+            layout.setSpacing(10)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            scroll.setWidget(content)
+            pages.addWidget(scroll)
+            return layout
 
-        icon_label = QLabel()
-        logo_size = 44
-        pm = load_icon_pixmap(logo_size)
-        if pm:
-            icon_label.setPixmap(pm)
-        icon_label.setFixedSize(logo_size, logo_size)
-        header.addWidget(icon_label)
-
-        title_col = QVBoxLayout()
-        title_col.setSpacing(0)
-        title_label = QLabel(tr("settings.app_name"))
-        title_label.setStyleSheet(
-            f"font-size: 20px; font-weight: 700; color: {COLOR_ACCENT};"
-            " background: transparent;"
-        )
-        title_col.addWidget(title_label)
-        subtitle_label = QLabel(tr("settings.subtitle"))
-        subtitle_label.setStyleSheet(
-            f"font-size: 11px; color: {COLOR_TEXT_SECONDARY};"
-            " background: transparent;"
-        )
-        title_col.addWidget(subtitle_label)
-        header.addLayout(title_col)
-        header.addStretch()
-
-        main_layout.addLayout(header)
-        main_layout.addSpacing(8)
-
-        # --- Scrollable content area ---
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(scroll.Shape.NoFrame)
-        scroll.setStyleSheet("QScrollArea { background: transparent; }")
-        scroll_widget = QWidget()
-        scroll_widget.setStyleSheet("background: transparent;")
-        content_layout = QVBoxLayout(scroll_widget)
-        content_layout.setSpacing(8)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        scroll.setWidget(scroll_widget)
-        main_layout.addWidget(scroll, 1)
+        input_page = page("settings.tab_input")
+        recognition_page = page("settings.tab_recognition")
+        preferences_page = page("settings.tab_preferences")
+        self._tabs.currentChanged.connect(self._cancel_capture)
+        self._tabs.currentChanged.connect(pages.setCurrentIndex)
 
         # --- Hotkeys ---
         hk_group = IconGroupBox(tr("settings.hotkey_section"), "keyboard")
@@ -152,62 +123,38 @@ class SettingsWindow(QDialog):
         ptt = s.get("hotkey", "push_to_talk", default={})
         toggle = s.get("hotkey", "toggle", default={})
 
-        ptt_col = QVBoxLayout()
-        ptt_col.setSpacing(6)
+        def shortcut_row(target, title, options, default_key):
+            row = QHBoxLayout()
+            label = QLabel(title)
+            row.addWidget(label, 1)
+            button = QPushButton(options.get("display", default_key))
+            button.setAutoDefault(False)
+            button.setToolTip(tr("settings.change_binding"))
+            button.setAccessibleName(f"{title} · {tr('settings.change_binding')}")
+            button.clicked.connect(lambda: self._start_hotkey_capture(target))
+            row.addWidget(button)
+            toggle_switch = ToggleSwitch(checked=options.get("enabled", True))
+            toggle_switch.setFixedWidth(toggle_switch.TRACK_WIDTH)
+            toggle_switch.setAccessibleName(title)
+            label.setBuddy(toggle_switch)
+            row.addWidget(toggle_switch)
+            hk_layout.addLayout(row)
+            return button, toggle_switch
 
-        self._ptt_toggle = ToggleSwitch(
-            tr("settings.push_to_talk"),
-            checked=ptt.get("enabled", True),
-        )
-        ptt_col.addWidget(self._ptt_toggle)
-
-        ptt_key_row = QHBoxLayout()
-        ptt_key_row.addWidget(QLabel(tr("settings.hotkey_label")))
-        self._ptt_edit = QLineEdit(ptt.get("display", "Caps Lock"))
-        self._ptt_edit.setReadOnly(True)
-        self._ptt_edit.setFixedWidth(120)
-        ptt_key_row.addWidget(self._ptt_edit)
-        self._ptt_bind_btn = QPushButton(tr("settings.change_binding"))
-        self._ptt_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("ptt"))
-        ptt_key_row.addWidget(self._ptt_bind_btn)
-        ptt_key_row.addStretch()
-        ptt_col.addLayout(ptt_key_row)
+        self._ptt_bind_btn, self._ptt_toggle = shortcut_row(
+            "ptt", tr("settings.push_to_talk"), ptt, "Caps Lock")
+        self._toggle_bind_btn, self._toggle_toggle = shortcut_row(
+            "toggle", tr("settings.toggle_mode"), toggle, "Right Ctrl")
 
         lp_row = QHBoxLayout()
-        lp_row.addWidget(QLabel(tr("settings.long_press_threshold")))
+        lp_row.addWidget(QLabel(tr("settings.long_press_threshold")), 1)
         self._long_press_spin = QSpinBox()
         self._long_press_spin.setRange(100, 1000)
         self._long_press_spin.setSingleStep(50)
         self._long_press_spin.setSuffix(" ms")
         self._long_press_spin.setValue(ptt.get("long_press_ms", 300))
         lp_row.addWidget(self._long_press_spin)
-        lp_row.addStretch()
-        ptt_col.addLayout(lp_row)
-
-        hk_layout.addLayout(ptt_col)
-
-        toggle_col = QVBoxLayout()
-        toggle_col.setSpacing(6)
-
-        self._toggle_toggle = ToggleSwitch(
-            tr("settings.toggle_mode"),
-            checked=toggle.get("enabled", True),
-        )
-        toggle_col.addWidget(self._toggle_toggle)
-
-        toggle_key_row = QHBoxLayout()
-        toggle_key_row.addWidget(QLabel(tr("settings.hotkey_label")))
-        self._toggle_edit = QLineEdit(toggle.get("display", "Right Ctrl"))
-        self._toggle_edit.setReadOnly(True)
-        self._toggle_edit.setFixedWidth(120)
-        toggle_key_row.addWidget(self._toggle_edit)
-        self._toggle_bind_btn = QPushButton(tr("settings.change_binding"))
-        self._toggle_bind_btn.clicked.connect(lambda: self._start_hotkey_capture("toggle"))
-        toggle_key_row.addWidget(self._toggle_bind_btn)
-        toggle_key_row.addStretch()
-        toggle_col.addLayout(toggle_key_row)
-
-        hk_layout.addLayout(toggle_col)
+        hk_layout.addLayout(lp_row)
 
         # -- Progressive input (full width, below columns) --
         self._progressive_toggle = ToggleSwitch(
@@ -237,14 +184,11 @@ class SettingsWindow(QDialog):
         self._progressive_opts.setVisible(self._progressive_toggle.isChecked())
         hk_layout.addWidget(self._progressive_opts)
 
-        content_layout.addWidget(hk_group)
 
         # --- Audio Input Section ---
-        mic_group = IconGroupBox(tr("settings.audio_section"), "microphone")
+        mic_group = IconGroupBox(tr("settings.microphone"), "microphone")
         mic_layout = QVBoxLayout(mic_group)
 
-        row_mic = QHBoxLayout()
-        row_mic.addWidget(QLabel(tr("settings.microphone")))
         self._mic_combo = QComboBox()
         self._input_devices = self._get_input_devices()
         for _, name in self._input_devices:
@@ -255,11 +199,11 @@ class SettingsWindow(QDialog):
                 self._mic_combo.setCurrentIndex(i)
                 break
         self._mic_combo.setMinimumWidth(240)
-        row_mic.addWidget(self._mic_combo)
-        row_mic.addStretch()
-        mic_layout.addLayout(row_mic)
+        self._mic_combo.setAccessibleName(tr("settings.microphone"))
+        mic_layout.addWidget(self._mic_combo)
 
-        content_layout.addWidget(mic_group)
+        input_page.addWidget(mic_group)
+        input_page.addWidget(hk_group)
 
         # --- ASR Section ---
         asr_group = IconGroupBox(tr("settings.asr_section"), "waveform")
@@ -296,7 +240,7 @@ class SettingsWindow(QDialog):
         asr_layout.addLayout(row4)
         asr_layout.addWidget(restart_hint_model)
 
-        content_layout.addWidget(asr_group)
+        recognition_page.addWidget(asr_group)
 
         # --- Speaker Verification Section ---
         sv_group = IconGroupBox(tr("settings.speaker_section"), "shield")
@@ -324,7 +268,7 @@ class SettingsWindow(QDialog):
         sv_btn_row.addWidget(self._enroll_btn)
         sv_layout.addLayout(sv_btn_row)
 
-        content_layout.addWidget(sv_group)
+        recognition_page.addWidget(sv_group)
 
         # --- Output Section ---
         out_group = IconGroupBox(tr("settings.output_section"), "gear")
@@ -359,7 +303,7 @@ class SettingsWindow(QDialog):
         )
         out_layout.addWidget(self._restore_toggle)
 
-        content_layout.addWidget(out_group)
+        preferences_page.addWidget(out_group)
 
         # --- Vocabulary Section ---
         vocab_group = IconGroupBox(tr("settings.vocab_section"), "book")
@@ -388,7 +332,7 @@ class SettingsWindow(QDialog):
         vocab_row.addWidget(open_btn)
         vocab_layout.addLayout(vocab_row)
 
-        content_layout.addWidget(vocab_group)
+        recognition_page.addWidget(vocab_group)
 
         # --- Text Processing Section ---
         tp_group = IconGroupBox(tr("settings.text_processing_section"), "gear")
@@ -408,7 +352,7 @@ class SettingsWindow(QDialog):
         punct_hint.setObjectName("secondaryLabel")
         punct_hint.setWordWrap(True)
         tp_layout.addWidget(punct_hint)
-        content_layout.addWidget(tp_group)
+        recognition_page.addWidget(tp_group)
 
         general_group = IconGroupBox(tr("settings.general_section"), "gear")
         general_layout = QVBoxLayout(general_group)
@@ -434,23 +378,22 @@ class SettingsWindow(QDialog):
         general_layout.addLayout(lang_row)
         general_layout.addWidget(restart_hint)
         general_layout.addWidget(self._autostart_toggle)
-        content_layout.addWidget(general_group)
+        preferences_page.addWidget(general_group)
 
         # --- Buttons ---
-        main_layout.addSpacing(8)
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
         save_btn = QPushButton(tr("settings.save"))
         save_btn.setObjectName("primaryButton")
         save_btn.clicked.connect(self._on_save_click)
-        btn_layout.addWidget(save_btn)
 
         cancel_btn = QPushButton(tr("settings.cancel"))
         cancel_btn.clicked.connect(self.close)
         btn_layout.addWidget(cancel_btn)
 
-        main_layout.addLayout(btn_layout)
+        btn_layout.addWidget(save_btn)
+        body.addLayout(btn_layout)
 
     # --- Progressive toggle ---
 
@@ -521,36 +464,44 @@ class SettingsWindow(QDialog):
 
     def _start_hotkey_capture(self, target: str) -> None:
         """Start capturing hotkey for 'ptt' or 'toggle' binding."""
-        self._capturing_hotkey = True
+        self._cancel_capture()
         self._captured_keys.clear()
         self._capture_target = target
-
-        if target == "ptt":
-            btn = self._ptt_bind_btn
-            edit = self._ptt_edit
-        else:
-            btn = self._toggle_bind_btn
-            edit = self._toggle_edit
-
+        btn = self._capture_button()
+        self._previous_binding = btn.text()
         btn.setText(tr("settings.press_hotkey"))
         btn.setObjectName("dangerButton")
         btn.style().unpolish(btn)
         btn.style().polish(btn)
-        edit.setText(tr("settings.waiting_input"))
-        # On macOS we use Qt key events (grabKeyboard) instead of the keyboard library
-        edit.setFocus()
-        edit.grabKeyboard()
-        self._hotkey_hook = True  # flag that we're capturing
+        self.grabKeyboard()
+
+    def _capture_button(self):
+        return self._ptt_bind_btn if self._capture_target == "ptt" else self._toggle_bind_btn
+
+    @Slot()
+    def _cancel_capture(self):
+        if self._capture_target is None:
+            return
+        btn = self._capture_button()
+        btn.setText(self._previous_binding)
+        btn.setObjectName("")
+        btn.style().unpolish(btn)
+        btn.style().polish(btn)
+        self.releaseKeyboard()
+        self._capture_target = None
 
     def keyPressEvent(self, event) -> None:
         """Capture hotkey via Qt key events (macOS compatible)."""
-        if not self._capturing_hotkey:
+        if self._capture_target is None:
             super().keyPressEvent(event)
             return
 
         from PySide6.QtCore import Qt as QtKey
         # Map Qt key to name
         key = event.key()
+        if key == QtKey.Key.Key_Escape:
+            self._cancel_capture()
+            return
         modifiers = event.modifiers()
 
         # Ignore pure modifier press, just track them
@@ -575,50 +526,25 @@ class SettingsWindow(QDialog):
             key_name = key_name.replace("Key_", "").lower()
             self._captured_keys.add(key_name)
 
-        edit = self._ptt_edit if self._capture_target == "ptt" else self._toggle_edit
         display = " + ".join(
             k.capitalize() for k in sorted(self._captured_keys)
         )
-        edit.setText(display)
+        self._capture_button().setText(display)
 
     def keyReleaseEvent(self, event) -> None:
         """Finalize hotkey capture on key release."""
-        if not self._capturing_hotkey or not self._captured_keys:
+        if self._capture_target is None or not self._captured_keys:
             super().keyReleaseEvent(event)
             return
 
-        self._capturing_hotkey = False
-        self._hotkey_hook = None
-        self.releaseKeyboard()
-
-        target = self._capture_target
         keys = sorted(self._captured_keys)
-        display = " + ".join(k.capitalize() for k in keys)
-
-        if target == "ptt":
+        btn = self._capture_button()
+        if self._capture_target == "ptt":
             self._ptt_keys = keys
         else:
             self._toggle_keys = keys
-
-        QMetaObject.invokeMethod(
-            self, "_finish_capture",
-            Qt.ConnectionType.QueuedConnection,
-            Q_ARG(str, target), Q_ARG(str, display),
-        )
-
-    @Slot(str, str)
-    def _finish_capture(self, target: str, display: str) -> None:
-        if target == "ptt":
-            self._ptt_edit.setText(display)
-            btn = self._ptt_bind_btn
-        else:
-            self._toggle_edit.setText(display)
-            btn = self._toggle_bind_btn
-
-        btn.setText(tr("settings.change_binding"))
-        btn.setObjectName("")
-        btn.style().unpolish(btn)
-        btn.style().polish(btn)
+        self._cancel_capture()
+        btn.setText(" + ".join(k.capitalize() for k in keys))
 
     # --- Vocabulary ---
 
@@ -648,6 +574,7 @@ class SettingsWindow(QDialog):
     # --- Save / Cancel ---
 
     def _on_save_click(self) -> None:
+        self._cancel_capture()
         lang_changed = False
         model_changed = False
         try:
@@ -655,7 +582,7 @@ class SettingsWindow(QDialog):
             self._settings.set("hotkey", "push_to_talk", {
                 "enabled": self._ptt_toggle.isChecked(),
                 "keys": self._ptt_keys,
-                "display": self._ptt_edit.text(),
+                "display": self._ptt_bind_btn.text(),
                 "long_press_ms": self._long_press_spin.value(),
             })
 
@@ -663,7 +590,7 @@ class SettingsWindow(QDialog):
             self._settings.set("hotkey", "toggle", {
                 "enabled": self._toggle_toggle.isChecked(),
                 "keys": self._toggle_keys,
-                "display": self._toggle_edit.text(),
+                "display": self._toggle_bind_btn.text(),
             })
 
             self._settings.set("hotkey", "progressive", self._progressive_toggle.isChecked())
@@ -718,7 +645,5 @@ class SettingsWindow(QDialog):
             )
 
     def closeEvent(self, event) -> None:
-        if self._hotkey_hook is not None:
-            self.releaseKeyboard()
-            self._hotkey_hook = None
+        self._cancel_capture()
         super().closeEvent(event)

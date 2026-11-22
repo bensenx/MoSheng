@@ -17,6 +17,40 @@ from safetensors.numpy import save_file
 from core import model_downloader as models
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows login startup")
+class AutostartTests(unittest.TestCase):
+    def test_registration_and_existing_entries(self):
+        from utils import autostart
+        reg = self.enterContext(patch.object(autostart, "winreg"))
+        reg.REG_SZ = 1
+        reg.KEY_QUERY_VALUE = 1
+        reg.KEY_SET_VALUE = 2
+        cmd = autostart._get_executable_command()
+        self.assertTrue(cmd.endswith('" --autostart'))
+        self.assertTrue(autostart.set_autostart(True))
+        self.assertEqual(reg.SetValueEx.call_args.args[-1], cmd)
+        reg.SetValueEx.reset_mock()
+        reg.QueryValueEx.return_value = (cmd.removesuffix(" --autostart"), 1)
+        autostart.refresh_autostart_command()
+        self.assertEqual(reg.SetValueEx.call_args.args[-1], cmd)
+        reg.SetValueEx.reset_mock()
+        for existing in (cmd, '"custom-wrapper.exe" --custom-option'):
+            reg.QueryValueEx.return_value = (existing, 1)
+            autostart.refresh_autostart_command()
+        reg.QueryValueEx.side_effect = FileNotFoundError
+        autostart.refresh_autostart_command()
+        reg.SetValueEx.assert_not_called()
+
+    def test_launcher_forwards_only_the_login_flag(self):
+        import launcher
+        root = Path("C:/MoSheng Test")
+        with patch.object(launcher.subprocess, "Popen") as start:
+            for args in ([], ["--autostart"]):
+                with patch.object(sys, "argv", ["MoSheng.exe", *args]):
+                    launcher.launch_app(root, root / "runtime")
+                self.assertEqual(start.call_args.args[0][1:], [str(root / "main.py"), *args])
+
+
 @unittest.skipUnless(sys.platform == "win32", "Windows clipboard")
 class ClipboardTests(unittest.TestCase):
     def setUp(self):

@@ -22,9 +22,13 @@ from settings_manager import SettingsManager
 
 if sys.platform == "win32":
     import ctypes
+    from utils.autostart import AUTOSTART_ARG, refresh_autostart_command
     _ERROR_ALREADY_EXISTS = 183
 
     def _fatal_msgbox(msg: str, title: str = "MoSheng - Error") -> None:
+        if AUTOSTART_ARG in sys.argv[1:]:
+            logging.getLogger(__name__).error("%s: %s", title, msg)
+            return
         ctypes.windll.user32.MessageBoxW(0, msg, title, 0x10)
 
     def _acquire_single_instance():
@@ -123,9 +127,11 @@ def load_asr_engine(settings: SettingsManager, snapshot, standby=None):
 
 
 def main():
+    background = sys.platform == "win32" and AUTOSTART_ARG in sys.argv[1:]
     lock = _acquire_single_instance()
     if lock is None:
-        _fatal_msgbox("MoSheng is already running.\n\nMoSheng 已在运行中。")
+        if not background:
+            _fatal_msgbox("MoSheng is already running.\n\nMoSheng 已在运行中。")
         return
 
     setup_logging()
@@ -140,6 +146,7 @@ def main():
 
     if sys.platform == "win32":
         from utils.windows_taskbar import set_process_identity
+        refresh_autostart_command()
         set_process_identity()
     qt_app = QApplication(sys.argv)
     qt_app.setQuitOnLastWindowClosed(False)
@@ -157,42 +164,19 @@ def main():
     from i18n import init_language, tr
     init_language(settings)
 
-    from ui.splash_screen import SplashScreen
     paused = sys.platform == "win32" and settings.get("dictation_paused", default=False)
-    if not paused:
+    splash = None
+    if background:
+        logger.info("[startup] background_autostart")
+    elif not paused:
+        from ui.splash_screen import SplashScreen
         splash = SplashScreen()
         splash.show()
         qt_app.processEvents()
         logger.info("[startup] splash_visible")
 
-    # ---- One-time model download (kept on main thread; has its own progress UI) ----
     from core.model_downloader import cached_snapshot, ModelDownloadThread
     model_id = settings.get("asr", "model_id", default="Qwen/Qwen3-ASR-1.7B")
-    snapshot = None if paused else cached_snapshot(model_id)
-    if not paused and snapshot is None:
-        model_name = settings.get("asr", "model_name", default="Qwen3-ASR-1.7B")
-        splash.set_status(tr("splash.downloading_model", name=model_name))
-        qt_app.processEvents()
-
-        download_thread = ModelDownloadThread(model_id)
-
-        def _on_download_progress(pct):
-            splash.set_status(tr("splash.download_progress", percent=pct))
-
-        download_thread.progress.connect(_on_download_progress)
-        download_thread.start()
-
-        while download_thread.isRunning():
-            qt_app.processEvents()
-            download_thread.wait(100)
-
-        snapshot = download_thread.snapshot
-        if snapshot is None:
-            _fatal_msgbox(
-                tr("error.model_download_failed", error=download_thread.failure),
-                tr("error.title"),
-            )
-            sys.exit(1)
 
     # ---- Bring up tray + hotkey IMMEDIATELY (no engine yet) ----
     from ui.app import MoShengApp
@@ -205,16 +189,23 @@ def main():
         if standby is not None and settings.get("asr", "device", default="auto") != "cpu":
             standby.prepare()
 
-    def resume_engine():
+    def resolve_snapshot(stage=None):
         selected = settings.get("asr", "model_id", default=model_id)
         local = cached_snapshot(selected)
-        if local is None:
-            downloader = ModelDownloadThread(selected)
-            downloader.run()
-            if downloader.snapshot is None:
-                raise RuntimeError(downloader.failure)
-            local = downloader.snapshot
-        engine = load_asr_engine(settings, local, standby)
+        if local is not None:
+            return local
+        downloader = ModelDownloadThread(selected)
+        if stage is not None:
+            name = settings.get("asr", "model_name", default=selected)
+            stage(tr("splash.downloading_model", name=name))
+            downloader.progress.connect(lambda pct: stage(tr("splash.download_progress", percent=pct)))
+        downloader.run()
+        if downloader.snapshot is None:
+            raise RuntimeError(tr("error.model_download_failed", error=downloader.failure))
+        return downloader.snapshot
+
+    def resume_engine():
+        engine = load_asr_engine(settings, resolve_snapshot(), standby)
         try:
             engine.warmup()
         except Exception:
@@ -232,9 +223,10 @@ def main():
     if paused:
         return qt_app.exec()
 
-    splash.set_status(tr("tray.loading"))
-    splash.set_hint(tr("splash.loading_asr_hint"))
-    qt_app.processEvents()
+    if splash is not None:
+        splash.set_status(tr("tray.loading"))
+        splash.set_hint(tr("splash.loading_asr_hint"))
+        qt_app.processEvents()
 
     # ---- Background worker: runtime check, ASR load and warmup ----
 
@@ -255,6 +247,7 @@ def main():
                     self.failed.emit()
                     return
 
+                snapshot = resolve_snapshot(self.stage.emit)
                 self.stage.emit(tr("tray.loading"))
                 engine = load_asr_engine(self._settings, snapshot)
                 self.stage.emit(tr("splash.warming"))
@@ -272,11 +265,12 @@ def main():
     def _on_asr_ready(engine):
         app.attach_asr(engine)
         atexit.register(engine.unload_model)
-        splash.set_hint("")
-        splash.finish()
+        if splash is not None:
+            splash.finish()
 
     worker = StartupWorker(settings)
-    worker.stage.connect(splash.set_status)
+    if splash is not None:
+        worker.stage.connect(splash.set_status)
     worker.asr_ready.connect(_on_asr_ready)
     worker.failed.connect(app._quit)
     qt_app.aboutToQuit.connect(worker.wait)

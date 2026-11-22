@@ -162,8 +162,12 @@ if sys.platform == "win32":
         return runtime
 
     def launch_app(app: Path, runtime: Path) -> None:
+        from utils.autostart import AUTOSTART_ARG
         pythonw = runtime / ".venv/Scripts/pythonw.exe"
-        subprocess.Popen([str(pythonw), str(app / "main.py")], cwd=app, env=launch_environment(app))
+        args = [str(pythonw), str(app / "main.py")]
+        if AUTOSTART_ARG in sys.argv[1:]:
+            args.append(AUTOSTART_ARG)
+        subprocess.Popen(args, cwd=app, env=launch_environment(app))
 
 
 def main() -> None:

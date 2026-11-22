@@ -262,6 +262,48 @@ class WorkerTests(unittest.TestCase):
 
 
 class ReadinessTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == "win32", "Windows login startup")
+    def test_both_startup_modes_attach_the_warmed_model_after_download(self):
+        import main
+        self.enterContext(patch.object(main, "_acquire_single_instance", return_value=True))
+        self.enterContext(patch.object(main, "refresh_autostart_command"))
+        self.enterContext(patch.object(main, "setup_logging"))
+        self.enterContext(patch("utils.windows_taskbar.set_process_identity"))
+        self.enterContext(patch("PySide6.QtWidgets.QApplication", return_value=app))
+        self.enterContext(patch("core.model_downloader.cached_snapshot", return_value=None))
+        self.enterContext(patch("core.model_downloader.ModelDownloadThread")).return_value.snapshot = "model"
+        self.enterContext(patch.object(main.atexit, "register"))
+        settings = self.enterContext(patch.object(main, "SettingsManager")).return_value
+        settings.get.side_effect = lambda *keys, default=None: default
+        splash = Mock()
+        self.enterContext(patch.dict(sys.modules, {"ui.splash_screen": SimpleNamespace(SplashScreen=splash)}))
+        desktop = self.enterContext(patch("ui.app.MoShengApp")).return_value
+        desktop.attach_asr.side_effect = lambda engine: app.quit()
+        engine = self.enterContext(patch.object(main, "load_asr_engine")).return_value
+        timeout = QTimer()
+        timeout.setSingleShot(True)
+        timeout.timeout.connect(app.quit)
+        for login in (True, False):
+            with self.subTest(login=login), patch.object(sys, "argv", ["main.py"] + (["--autostart"] if login else [])):
+                timeout.start(5000)
+                with self.assertRaises(SystemExit):
+                    main.main()
+                timeout.stop()
+                worker = app._startup_worker
+                app.aboutToQuit.disconnect(worker.wait)
+                del app._startup_worker
+                worker.deleteLater()
+                desktop.start.assert_called_once()
+                engine.warmup.assert_called_once()
+                desktop.attach_asr.assert_called_once_with(engine)
+                if login:
+                    splash.assert_not_called()
+                else:
+                    splash.return_value.show.assert_called_once()
+                    splash.return_value.finish.assert_called_once()
+                desktop.reset_mock()
+                engine.reset_mock()
+
     def test_standby_close_skips_device_discovery_and_weights(self):
         from core.windows_model_host import _serve
         pipe = Mock()

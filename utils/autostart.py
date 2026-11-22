@@ -11,6 +11,7 @@ import sys
 logger = logging.getLogger(__name__)
 
 APP_NAME = "MoSheng"
+AUTOSTART_ARG = "--autostart"
 
 if sys.platform == "darwin":
     import plistlib
@@ -53,18 +54,40 @@ if sys.platform == "darwin":
             return False
 
 elif sys.platform == "win32":
+    import re
     import winreg
 
     REGISTRY_KEY = r"SOFTWARE\Microsoft\Windows\CurrentVersion\Run"
 
     def _get_executable_command() -> str:
         if getattr(sys, "frozen", False):
-            return f'"{sys.executable}"'
+            return f'"{sys.executable}" {AUTOSTART_ARG}'
         else:
             app_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             pythonw = os.path.join(sys.prefix, "Scripts", "pythonw.exe")
             main_py = os.path.join(app_dir, "main.py")
-            return f'"{pythonw}" "{main_py}"'
+            return f'"{pythonw}" "{main_py}" {AUTOSTART_ARG}'
+
+    def refresh_autostart_command() -> None:
+        """Upgrade an existing MoSheng Run entry, including after extracting an update."""
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REGISTRY_KEY, 0,
+                                winreg.KEY_QUERY_VALUE | winreg.KEY_SET_VALUE) as key:
+                value, kind = winreg.QueryValueEx(key, APP_NAME)
+                command = _get_executable_command()
+                if kind != winreg.REG_SZ or value == command:
+                    return
+                same_install = value.casefold() == command.removesuffix(" " + AUTOSTART_ARG).casefold()
+                packaged = os.path.isfile(os.path.join(os.path.dirname(__file__), "..", "MoSheng.exe"))
+                previous_install = re.fullmatch(
+                    r'(?:"[^"]+\\pythonw\.exe" "[^"]+\\main\.py"|"[^"]+\\MoSheng\.exe")(?: --autostart)?',
+                    value, re.IGNORECASE)
+                if same_install or (packaged and previous_install):
+                    winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, command)
+        except FileNotFoundError:
+            pass  # Disabled autostart stays disabled.
+        except OSError:
+            logger.warning("Could not refresh the Windows startup entry", exc_info=True)
 
     def is_autostart_enabled() -> bool:
         try:

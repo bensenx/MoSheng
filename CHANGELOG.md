@@ -1,5 +1,9 @@
 # Changelog
 
+## v1.4.1 (2026-11-21) · Windows
+
+- Start in the tray at Windows sign-in and keep the splash screen for manual launches. Existing MoSheng startup entries are updated when the new version is opened. [#4](https://github.com/bensenx/MoSheng/issues/4)
+
 ## v1.4.0 (2026-11-21) · Windows
 
 - Pause dictation from the tray to release GPU memory while keeping the Chinese/English caret indicator active. Resume manually after a game.

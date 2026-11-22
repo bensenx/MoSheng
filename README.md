@@ -208,6 +208,10 @@ hdiutil create -volname MoSheng -srcfolder dist/MoSheng.app -ov -format UDZO dis
 
 ## Changelog
 
+### v1.4.1 · Windows
+
+- At Windows sign-in, MoSheng starts in the tray. Opening MoSheng manually still shows loading progress.
+
 ### v1.4.0 · Windows
 
 - Right-click the tray icon to pause dictation and free GPU memory. The Chinese/English caret indicator stays active. Choose **Resume dictation** after your game.
@@ -411,6 +415,10 @@ uv run python main.py
 在 `~/.mosheng/vocabulary.csv` 中添加专业术语，每行一个，帮助提高识别率。
 
 ## 更新日志
+
+### v1.4.1 · Windows
+
+- 登录 Windows 时，墨声在后台启动并进入托盘。手动打开时仍会显示加载进度。
 
 ### v1.4.0 · Windows
 
